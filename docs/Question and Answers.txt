@@ -1,0 +1,79 @@
+Question and Answers
+
+---
+
+1. Project structure: Do you want a single Spring Boot module (standard package layout) or a multi-module Maven/Gradle project? The spec doesn't specify.
+2. Build tool: Maven or Gradle?
+3. JWT library: The spec says jjwt — any version preference, or should I pick the latest stable (0.12.x)?
+4. Kafka consumer group IDs: Should ReportingConsumer and NotificationConsumer be in the same consumer group (both get every event independently) or separate groups? (They should be separate
+   — just confirming you agree.)
+5. Starting point: Do you want me to build all 5 modules end-to-end, or start with a specific module first (e.g., Module 1 + 2 + 3 before touching Kafka)?
+6. Tests: Should I include unit/integration tests as I build, or skip tests and focus on the implementation?
+
+Answers
+
+1. Project Structure: Three separate Spring Boot applications (microservices architecture):
+   - api-gateway-service
+   - loan-service
+   - notification-service
+     Each with its own pom.xml, own PostgreSQL database, and independent deployment.
+
+2. Build Tool: Maven
+
+3. JWT Library: Latest stable 0.12.x
+
+4. Kafka Consumer Groups: Separate groups
+   - reporting-group for ReportingConsumer
+   - notification-group for NotificationConsumer
+     So both consumers independently receive every event.
+
+5. Starting Point: Build module by module in this order:
+   - First: loan-service (domain + REST API + JWT auth)
+   - Second: notification-service (Kafka consumers)
+   - Third: api-gateway-service (routing + JWT validation)
+     Do not build everything at once. Each service should be working before moving to the next.
+
+6. Tests: Skip tests for now. Focus on implementation first.
+
+---
+
+1. Parent POM: Do you want a root pom.xml that ties all three services together as Maven modules (monorepo style), or three fully independent Maven projects with no shared parent?
+2. Database ownership: With separate databases per service, how should the data be split?
+
+
+    - loan-service: owns all core tables (User, Borrower, LoanApplication, Assessment, Decision, Documents, AuditLog)?
+    - notification-service: owns its own reporting/notification tables (populated from Kafka events)?
+    - api-gateway-service: no database?
+
+3. JWT validation placement: Two common patterns:
+
+
+    - Gateway only — api-gateway validates the JWT, forwards requests with a trusted header (e.g., X-User-Id, X-User-Role), and downstream services trust that header blindly.
+    - Gateway + each service — every service independently validates the JWT.s Which do you prefer?
+
+4. Port assignments: Any preferences, or should I use standard defaults like 8080 (gateway), 8081 (loan-service), 8082 (notification-service)?
+5. api-gateway-service tech: Plain Spring Cloud Gateway (reactive, non-blocking), or Spring MVC with RestTemplate/WebClient proxying? Spring Cloud Gateway is the standard choice here — just confirming.
+
+6. Parent POM: Use a root pom.xml that ties all three services together
+   as Maven modules (monorepo style). Easier to manage in one repository.
+
+7. Database ownership:
+   - loan-service: owns all core tables (User, Borrower, LoanApplication,
+     PropertyAssessment, UnderwritingDecision, LoanDocument, AuditLog)
+   - notification-service: owns its own reporting and notification tables
+     (populated from Kafka events)
+   - api-gateway-service: no database
+
+8. JWT validation placement: Gateway only.
+   - api-gateway validates the JWT
+   - Forwards X-User-Id and X-User-Role as trusted headers to downstream services
+   - loan-service and notification-service trust those headers blindly
+     This keeps JWT logic in one place and is cleaner for a project this size.
+
+9. Port assignments: Use standard defaults
+   - 8080 for api-gateway-service
+   - 8081 for loan-service
+   - 8082 for notification-service
+
+10. API Gateway tech: Spring Cloud Gateway (reactive, non-blocking).
+    Standard choice, go with it.
