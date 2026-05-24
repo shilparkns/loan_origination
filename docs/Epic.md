@@ -324,22 +324,109 @@ EPIC 6 — notification-service: Kafka Consumers
 ▎ Goal: Two independent consumers process every loan status event — one for reporting, one for notifications.
 
 - EP6-T1 — notification-service database schema (Flyway)
-  - What to build: V1**create_loan_status_events.sql (persisted event log: loanId, fromStatus, toStatus, changedBy, receivedAt) and V2**create_notification_log.sql (notificationId, loanId, notifiedRole, message,
-    notifiedAt).
+  - What to build: V1__create_loan_status_events.sql (persisted event log: loanId, fromStatus, toStatus, changedBy, receivedAt) and V2__create_notification_log.sql (notificationId, loanId, notifiedRole, message, notifiedAt).
   - Acceptance criteria: Both tables created on notification-service startup.
+  - How to verify:
+    ```
+    # Start notification-service
+    mvn -pl notification-service spring-boot:run
+    
+    # Check logs for Flyway migration success
+    # Expected: "Successfully validated 2 migrations" or similar
+    
+    # Query the database
+    docker exec notification-db psql -U notifyuser -d notificationdb -c "
+      SELECT table_name FROM information_schema.tables 
+      WHERE table_schema = 'public';
+    "
+    # Expected: loan_status_events and notification_log tables exist
+    ```
 - EP6-T2 — Kafka consumer configuration
   - What to build: Two @Bean consumer factory + listener container factory pairs — one for reporting-group, one for notification-group. Both use earliest auto offset reset. JsonDeserializer for LoanStatusEvent.
   - Acceptance criteria: Both consumer groups connect to Kafka on startup (visible in Kafka consumer group list).
+  - How to verify:
+    ```
+    # Start notification-service (connects both consumers)
+    mvn -pl notification-service spring-boot:run
+    
+    # Check logs for successful consumer group join
+    # Expected: "[Consumer clientId=consumer-reporting-group-*] Successfully joined group"
+    #           "[Consumer clientId=consumer-notification-group-*] Successfully joined group"
+    
+    # List Kafka consumer groups
+    docker exec kafka kafka-consumer-groups --bootstrap-server localhost:9092 --list
+    # Expected: reporting-group and notification-group appear in output
+    ```
 - EP6-T3 — LoanStatusEvent model (notification-service side)
   - What to build: Mirror of the producer's LoanStatusEvent POJO in notification-service, including the notifyRole field. Owned independently — no shared library.
   - Acceptance criteria: Deserializes correctly from the JSON the producer sends, including notifyRole.
+  - How to verify:
+    ```
+    # Start both services
+    mvn -pl loan-service spring-boot:run
+    mvn -pl notification-service spring-boot:run
+    
+    # Register and login to get JWT
+    curl -s -X POST http://localhost:8081/auth/register \
+      -H "Content-Type: application/json" \
+      -d '{"firstName":"Test","lastName":"User","email":"test@test.com","password":"pass123","role":"CREDIT_OFFICER"}' \
+      | jq '.token' -r > /tmp/token.txt
+    
+    TOKEN=$(cat /tmp/token.txt)
+    
+    # Create a loan and transition it (publishes Kafka event)
+    # (You'll need loan data in DB first)
+    
+    # Check notification-service logs for successful deserialization
+    # Expected: "[NOTIFY] CREDIT_OFFICER team notified for loan X" appears in logs
+    #           (if this appears, deserialization worked)
+    ```
 - EP6-T4 — ReportingConsumer
   - What to build: Listens on loan-status-changes with reporting-group. Persists each event to loan_status_events table. Idempotent: check if a record for this loanId + toStatus already exists before inserting.
   - Acceptance criteria: Each unique status change is persisted exactly once. Duplicate events do not create duplicate rows.
+  - How to verify:
+    ```
+    # With all services running, transition a loan status
+    TOKEN="<your_jwt_token>"
+    curl -s -X PATCH http://localhost:8081/api/loans/1/status \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "X-User-Id: <user_id>" \
+      -H "X-User-Role: CREDIT_OFFICER" \
+      -d '{"toStatus":"UNDER_REVIEW"}'
+    
+    # Query notification-service database
+    docker exec notification-db psql -U notifyuser -d notificationdb -c "
+      SELECT loan_id, from_status, to_status, changed_by FROM loan_status_events;
+    "
+    # Expected: 1 row for loan 1, APPLIED → UNDER_REVIEW
+    
+    # Replay the same transition (simulating Kafka duplicate delivery)
+    # (manually reset loan status back to APPLIED, then transition again)
+    
+    # Query again
+    # Expected: STILL only 1 row (idempotency worked - no duplicate created)
+    ```
 - EP6-T5 — NotificationConsumer
-  - What to build: Listens on loan-status-changes with notification-group. Reads event.getNotifyRole() directly from the event payload — no database query. Logs simulated notification to console and writes a row to
-    notification_log. Idempotent: check if a notification for this loanId + notifyRole already exists before inserting.
+  - What to build: Listens on loan-status-changes with notification-group. Reads event.getNotifyRole() directly from the event payload — no database query. Logs simulated notification to console and writes a row to notification_log. Idempotent: check if a notification for this loanId + notifyRole already exists before inserting.
   - Acceptance criteria: Each status change logs a line like [NOTIFY] LEGAL team notified for loan 42. Notification log row written. Duplicate events do not produce duplicate log entries.
+  - How to verify:
+    ```
+    # With all services running, check notification-service logs
+    # Expected: "[NOTIFY] CREDIT_OFFICER team notified for loan 1" appears
+    
+    # Query notification_log table
+    docker exec notification-db psql -U notifyuser -d notificationdb -c "
+      SELECT loan_id, notified_role, message FROM notification_log;
+    "
+    # Expected: 1 row with loanId=1, notifiedRole=CREDIT_OFFICER
+    
+    # Replay the same event (reset and transition again)
+    # Check logs again
+    # Expected: [NOTIFY] message appears again (expected behavior)
+    
+    # Query notification_log again
+    # Expected: STILL only 1 row for this (loanId, notifiedRole) pair (idempotency worked)
+    ```
 
 ---
 
