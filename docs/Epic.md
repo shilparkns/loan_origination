@@ -90,29 +90,166 @@ EPIC 4 — loan-service: Loan REST API
 - EP4-T1 — POST /api/loans (submit application)
   - What to build: BORROWER submits a new loan. Reads X-User-Id header (from gateway) to find the Borrower profile. Validates loanAmount > 0. Creates LoanApplication in APPLIED state. Writes AuditLog entry.
   - Acceptance criteria: BORROWER can create a loan. Non-BORROWER gets 403. loanAmount ≤ 0 returns 400 with spec error format.
+  - How to verify:
+    ```
+    # BORROWER creates loan (success)
+    POST http://localhost:8080/api/auth/register { "email": "borrower@test.com", "password": "pass", "role": "BORROWER", ... }
+    POST http://localhost:8080/api/auth/login { "email": "borrower@test.com", "password": "pass" } → get JWT
+    POST http://localhost:8080/api/loans { "loanAmount": 250000, "propertyAddress": "123 Main St" } -H "Authorization: Bearer <JWT>"
+    # Expected: 201 with { "id": 1, "status": "APPLIED", ... }
+    
+    # Non-BORROWER attempts (should fail)
+    POST http://localhost:8080/api/loans { ... } -H "X-User-Role: CREDIT_OFFICER"
+    # Expected: 403
+    
+    # Negative loan amount (should fail)
+    POST http://localhost:8080/api/loans { "loanAmount": -100, ... }
+    # Expected: 400 with error message
+    ```
 - EP4-T2 — GET /api/loans (list loans, role-filtered)
   - What to build: Returns loans visible to the caller's role: BORROWER sees only their own; CREDIT_OFFICER sees APPLIED; APPRAISER sees UNDER_REVIEW; UNDERWRITER sees ASSESSED; LEGAL sees APPROVED; DISBURSEMENT sees
     LEGAL_REVIEW; ADMIN sees all. Returns list of LoanSummaryDTO.
   - Acceptance criteria: Each role gets exactly the loans they should see. Empty list (not 403) if no matching loans exist.
+  - How to verify:
+    ```
+    # Create loans in different statuses (via admin/direct DB or API)
+    
+    # BORROWER sees own loans only
+    GET http://localhost:8080/api/loans -H "Authorization: Bearer <BORROWER_JWT>"
+    # Expected: only loans where borrower_id matches current user
+    
+    # CREDIT_OFFICER sees APPLIED loans only
+    GET http://localhost:8080/api/loans -H "Authorization: Bearer <CREDIT_OFFICER_JWT>"
+    # Expected: only loans with status=APPLIED
+    
+    # ADMIN sees all loans
+    GET http://localhost:8080/api/loans -H "Authorization: Bearer <ADMIN_JWT>"
+    # Expected: all loans in system
+    
+    # No loans in role's status → empty list (not error)
+    GET http://localhost:8080/api/loans -H "X-User-Role: APPRAISER" (if no UNDER_REVIEW loans)
+    # Expected: 200 with []
+    ```
 - EP4-T3 — GET /api/loans/{id} (get single loan)
   - What to build: Returns LoanDetailDTO (loan + borrower + assessment + decision + documents). Applies same visibility rules as list — returns 403 if the caller has no permission to see this loan's current state.
   - Acceptance criteria: Correct loan returned for authorized caller. 403 for unauthorized. 404 for nonexistent loan.
+  - How to verify:
+    ```
+    # Authorized caller (loan in correct status for their role)
+    GET http://localhost:8080/api/loans/1 -H "Authorization: Bearer <AUTHORIZED_JWT>"
+    # Expected: 200 with full LoanDetailDTO (includes borrower, assessment, decision, documents)
+    
+    # Unauthorized caller (loan not in their visible status)
+    GET http://localhost:8080/api/loans/1 -H "Authorization: Bearer <UNAUTHORIZED_JWT>"
+    # Expected: 404 (per spec, we return 404 for both "not found" and "not authorized")
+    
+    # Nonexistent loan
+    GET http://localhost:8080/api/loans/99999 -H "Authorization: Bearer <JWT>"
+    # Expected: 404
+    ```
 - EP4-T4 — PATCH /api/loans/{id}/status (status transition + AuditLog)
   - What to build: Validates the transition is legal per the spec state machine (e.g., APPLIED → UNDER_REVIEW only by CREDIT_OFFICER, ASSESSED → APPROVED/REJECTED only by UNDERWRITER). Writes AuditLog on every
     successful transition. Returns 400 for invalid transitions.
   - Acceptance criteria: Valid transitions update status and write audit entry. Invalid transitions return 400 with clear message. Role mismatches return 403.
+  - How to verify:
+    ```
+    # Valid transition (CREDIT_OFFICER moves APPLIED → UNDER_REVIEW)
+    PATCH http://localhost:8080/api/loans/1/status { "toStatus": "UNDER_REVIEW" } -H "Authorization: Bearer <CREDIT_OFFICER_JWT>"
+    # Expected: 200 with updated loan (status=UNDER_REVIEW)
+    # Check DB: audit_logs table has entry for this transition
+    
+    # Invalid transition (try to move APPLIED → ASSESSED directly)
+    PATCH http://localhost:8080/api/loans/1/status { "toStatus": "ASSESSED" } -H "Authorization: Bearer <CREDIT_OFFICER_JWT>"
+    # Expected: 400 with error message
+    
+    # Role mismatch (non-CREDIT_OFFICER tries APPLIED → UNDER_REVIEW)
+    PATCH http://localhost:8080/api/loans/1/status { "toStatus": "UNDER_REVIEW" } -H "Authorization: Bearer <APPRAISER_JWT>"
+    # Expected: 400 (only CREDIT_OFFICER can do this transition)
+    ```
 - EP4-T5 — POST /api/loans/{id}/assessment (APPRAISER)
   - What to build: APPRAISER submits PropertyAssessment for a loan in UNDER_REVIEW state. Transitions loan to ASSESSED. Writes AuditLog.
   - Acceptance criteria: Assessment created, loan moves to ASSESSED. Returns 400 if loan is not in UNDER_REVIEW. Returns 403 for non-APPRAISER.
+  - How to verify:
+    ```
+    # APPRAISER submits assessment for UNDER_REVIEW loan
+    POST http://localhost:8080/api/loans/1/assessment { "assessedValue": 350000 } -H "Authorization: Bearer <APPRAISER_JWT>"
+    # Expected: 201 with updated loan (status=ASSESSED)
+    # Check DB: property_assessments table has new record, audit_logs has transition entry
+    
+    # Non-UNDER_REVIEW loan (should fail)
+    POST http://localhost:8080/api/loans/2/assessment { "assessedValue": 350000 } (loan 2 in APPLIED state)
+    # Expected: 400 with error message
+    
+    # Non-APPRAISER attempts (should fail)
+    POST http://localhost:8080/api/loans/1/assessment { ... } -H "Authorization: Bearer <CREDIT_OFFICER_JWT>"
+    # Expected: 400
+    ```
 - EP4-T6 — POST /api/loans/{id}/decision (UNDERWRITER)
   - What to build: UNDERWRITER submits UnderwritingDecision (APPROVED or REJECTED) for a loan in ASSESSED state. Transitions loan to APPROVED or REJECTED accordingly. Writes AuditLog.
   - Acceptance criteria: Decision persisted, loan status updated. 400 if loan not in ASSESSED. 403 for non-UNDERWRITER.
+  - How to verify:
+    ```
+    # UNDERWRITER approves ASSESSED loan
+    POST http://localhost:8080/api/loans/1/decision { "decision": "APPROVED", "notes": "Strong profile" } -H "Authorization: Bearer <UNDERWRITER_JWT>"
+    # Expected: 201 with updated loan (status=APPROVED)
+    # Check DB: underwriting_decisions table has new record, audit_logs has transition entry
+    
+    # UNDERWRITER rejects ASSESSED loan
+    POST http://localhost:8080/api/loans/2/decision { "decision": "REJECTED", "notes": "Credit score too low" } -H "Authorization: Bearer <UNDERWRITER_JWT>"
+    # Expected: 201 with loan (status=REJECTED)
+    
+    # Non-ASSESSED loan (should fail)
+    POST http://localhost:8080/api/loans/3/decision { "decision": "APPROVED" } (loan 3 in UNDER_REVIEW)
+    # Expected: 400
+    
+    # Non-UNDERWRITER attempts
+    POST http://localhost:8080/api/loans/1/decision { ... } -H "Authorization: Bearer <APPRAISER_JWT>"
+    # Expected: 400
+    ```
 - EP4-T7 — POST /api/loans/{id}/documents (LEGAL)
   - What to build: LEGAL uploads a document reference (path string, no real file). Loan must be in LEGAL_REVIEW state. Writes LoanDocument record. Does not change loan status.
   - Acceptance criteria: Document record created. 400 if loan not in LEGAL_REVIEW. 403 for non-LEGAL.
+  - How to verify:
+    ```
+    # LEGAL uploads document for LEGAL_REVIEW loan
+    POST http://localhost:8080/api/loans/1/documents { "documentType": "deed", "filePath": "/docs/deed_123.pdf" } -H "Authorization: Bearer <LEGAL_JWT>"
+    # Expected: 201 with loan (status still LEGAL_REVIEW, unchanged)
+    # Check DB: loan_documents table has new record
+    
+    # Verify status didn't change
+    GET http://localhost:8080/api/loans/1
+    # Expected: status still LEGAL_REVIEW
+    
+    # Non-LEGAL_REVIEW loan (should fail)
+    POST http://localhost:8080/api/loans/2/documents { ... } (loan 2 in APPROVED)
+    # Expected: 400
+    
+    # Non-LEGAL attempts
+    POST http://localhost:8080/api/loans/1/documents { ... } -H "Authorization: Bearer <UNDERWRITER_JWT>"
+    # Expected: 400
+    ```
 - EP4-T8 — PATCH /api/loans/{id}/disburse (DISBURSEMENT)
   - What to build: DISBURSEMENT moves loan from LEGAL_REVIEW to DISBURSED. Writes AuditLog.
   - Acceptance criteria: Loan moves to DISBURSED. 400 if not in LEGAL_REVIEW. 403 for non-DISBURSEMENT.
+  - How to verify:
+    ```
+    # DISBURSEMENT disburses LEGAL_REVIEW loan
+    PATCH http://localhost:8080/api/loans/1/disburse -H "Authorization: Bearer <DISBURSEMENT_JWT>"
+    # Expected: 200 with updated loan (status=DISBURSED)
+    # Check DB: audit_logs has transition entry
+    
+    # Non-LEGAL_REVIEW loan (should fail)
+    PATCH http://localhost:8080/api/loans/2/disburse (loan 2 in APPROVED)
+    # Expected: 400
+    
+    # Non-DISBURSEMENT attempts
+    PATCH http://localhost:8080/api/loans/1/disburse -H "Authorization: Bearer <LEGAL_JWT>"
+    # Expected: 400
+    
+    # Terminal state: can't transition further from DISBURSED
+    PATCH http://localhost:8080/api/loans/1/disburse (loan 1 already DISBURSED)
+    # Expected: 400
+    ```
 
 ---
 
@@ -123,13 +260,62 @@ EPIC 5 — loan-service: Kafka Producer
 - EP5-T1 — Kafka producer configuration
   - What to build: KafkaProducerConfig bean — bootstrap servers from application.yml, StringSerializer for key, JsonSerializer for value. Topic name as a constant.
   - Acceptance criteria: Bean wires up cleanly. No errors on startup when Kafka is running.
+  - How to verify:
+    ```
+    # Start Kafka (docker compose up)
+    cd loan_origination
+    docker compose up
+    
+    # Start loan-service
+    mvn -pl loan-service spring-boot:run
+    
+    # Check logs for successful Kafka connection
+    # Expected: no errors in logs, application starts successfully
+    # Expected: "Kafka producer initialized" or similar (if we log it)
+    
+    # Verify topic constant exists in code
+    grep -r "LOAN_STATUS_CHANGES_TOPIC" loan-service/src
+    # Expected: finds KafkaProducerConfig.java with constant defined
+    ```
 - EP5-T2 — LoanStatusEvent model + KafkaProducerService
   - What to build: LoanStatusEvent POJO (loanId, fromStatus, toStatus, changedBy, timestamp, notifyRole). KafkaProducerService.publish(LoanStatusEvent) sends to topic loan-status-changes.
   - Acceptance criteria: Publishing a test event sends a message to Kafka (verifiable via Kafka CLI consumer).
+  - How to verify:
+    ```
+    # Start consumer in terminal 1
+    docker exec <kafka-container> kafka-console-consumer --bootstrap-server localhost:9092 --topic loan-status-changes --from-beginning
+    
+    # In another terminal, run a test or curl to trigger a status change
+    # (once EP5-T3 is done, just change a loan status)
+    
+    # Expected output in consumer terminal: JSON message
+    # Example: {"loanId": 1, "fromStatus": "APPLIED", "toStatus": "UNDER_REVIEW", "changedBy": "officer@bank.com", "timestamp": "2025-05-24T10:30:00", "notifyRole": "CREDIT_OFFICER"}
+    ```
 - EP5-T3 — Wire producer into all status change flows
   - What to build: Call KafkaProducerService.publish(...) immediately after every successful status transition (EP4-T4 through EP4-T8). The changedBy field is the email pulled from the User entity for the X-User-Id
     header value. The notifyRole field is computed from a toStatus → role mapping in loan-service before publishing (e.g. UNDER_REVIEW → CREDIT_OFFICER, ASSESSED → APPRAISER, etc.).
   - Acceptance criteria: Every status change in the system produces a Kafka event with notifyRole populated. Verified end-to-end: hit API → check Kafka topic for event.
+  - How to verify:
+    ```
+    # Start Kafka consumer
+    docker exec <kafka-container> kafka-console-consumer --bootstrap-server localhost:9092 --topic loan-status-changes --from-beginning
+    
+    # Create a loan (status: APPLIED)
+    POST /api/loans { "loanAmount": 250000, "propertyAddress": "123 Main St" }
+    
+    # Move to UNDER_REVIEW (as CREDIT_OFFICER)
+    PATCH /api/loans/1/status { "toStatus": "UNDER_REVIEW" }
+    
+    # Check Kafka consumer output
+    # Expected: event with notifyRole=CREDIT_OFFICER (because UNDER_REVIEW → CREDIT_OFFICER listens)
+    
+    # Submit assessment (as APPRAISER) → expect event with notifyRole=APPRAISER
+    # Submit decision (as UNDERWRITER) → expect event with notifyRole=UNDERWRITER
+    # Upload document (as LEGAL) → check that event has correct notifyRole (for next status)
+    # Disburse (as DISBURSEMENT) → expect event with notifyRole reflecting DISBURSED
+    
+    # Verify all events have: loanId, fromStatus, toStatus, changedBy (email), timestamp, notifyRole
+    ```
 
 ---
 
