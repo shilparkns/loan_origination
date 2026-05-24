@@ -3,6 +3,7 @@ package com.loanorigination.loanservice.controller;
 import com.loanorigination.loanservice.dto.CreateLoanRequest;
 import com.loanorigination.loanservice.dto.LoanApplicationDTO;
 import com.loanorigination.loanservice.dto.LoanDetailDTO;
+import com.loanorigination.loanservice.dto.LoanDocumentRequest;
 import com.loanorigination.loanservice.dto.LoanSummaryDTO;
 import com.loanorigination.loanservice.dto.PropertyAssessmentRequest;
 import com.loanorigination.loanservice.dto.UnderwritingDecisionRequest;
@@ -149,6 +150,25 @@ public class LoanController {
         try {
             LoanApplicationDTO updatedLoan = loanService.submitDecision(id, userId, userRole, request);
             return ResponseEntity.status(HttpStatus.CREATED).body(updatedLoan);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    // POST /api/loans/{id}/documents — LEGAL uploads a document reference.
+    // Document must have type and file path. Loan must be in LEGAL_REVIEW status.
+    // Does not change loan status. Returns 201 with loan (unchanged).
+    // Returns 400 if invalid state/role, 404 if not found.
+    @PostMapping("/{id}/documents")
+    public ResponseEntity<LoanApplicationDTO> uploadDocument(
+            @PathVariable Long id,
+            @Valid @RequestBody LoanDocumentRequest request,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole) {
+
+        try {
+            LoanApplicationDTO loan = loanService.uploadDocument(id, userId, userRole, request);
+            return ResponseEntity.status(HttpStatus.CREATED).body(loan);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
         }

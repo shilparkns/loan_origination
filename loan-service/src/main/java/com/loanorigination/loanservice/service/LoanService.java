@@ -3,12 +3,14 @@ package com.loanorigination.loanservice.service;
 import com.loanorigination.loanservice.dto.CreateLoanRequest;
 import com.loanorigination.loanservice.dto.LoanApplicationDTO;
 import com.loanorigination.loanservice.dto.LoanDetailDTO;
+import com.loanorigination.loanservice.dto.LoanDocumentRequest;
 import com.loanorigination.loanservice.dto.LoanSummaryDTO;
 import com.loanorigination.loanservice.dto.PropertyAssessmentRequest;
 import com.loanorigination.loanservice.dto.UnderwritingDecisionRequest;
 import com.loanorigination.loanservice.entity.AuditLog;
 import com.loanorigination.loanservice.entity.Borrower;
 import com.loanorigination.loanservice.entity.LoanApplication;
+import com.loanorigination.loanservice.entity.LoanDocument;
 import com.loanorigination.loanservice.entity.PropertyAssessment;
 import com.loanorigination.loanservice.entity.UnderwritingDecision;
 import com.loanorigination.loanservice.entity.User;
@@ -321,6 +323,44 @@ public class LoanService {
                 updatedLoan.getPropertyAddress(),
                 updatedLoan.getStatus(),
                 updatedLoan.getCreatedAt()
+        );
+    }
+
+    // LEGAL uploads a document reference for a loan in LEGAL_REVIEW state.
+    // Creates LoanDocument record but does not change loan status.
+    // Throws IllegalArgumentException if loan not found, not in LEGAL_REVIEW, or user is not LEGAL.
+    public LoanApplicationDTO uploadDocument(Long loanId, Long userId, String userRole, LoanDocumentRequest request) {
+        if (!"LEGAL".equals(userRole)) {
+            throw new IllegalArgumentException("Only LEGAL can upload documents");
+        }
+
+        LoanApplication loan = loanApplicationRepository.findById(loanId)
+                .orElseThrow(() -> new IllegalArgumentException("Loan not found"));
+
+        if (loan.getStatus() != LoanStatus.LEGAL_REVIEW) {
+            throw new IllegalArgumentException("Loan must be in LEGAL_REVIEW status to upload documents");
+        }
+
+        User uploadedBy = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        // Create LoanDocument (no status change).
+        LoanDocument document = LoanDocument.builder()
+                .loanApplication(loan)
+                .uploadedBy(uploadedBy)
+                .documentType(request.getDocumentType())
+                .filePath(request.getFilePath())
+                .build();
+
+        loanDocumentRepository.save(document);
+
+        // Return the loan without changes (status remains LEGAL_REVIEW).
+        return new LoanApplicationDTO(
+                loan.getId(),
+                loan.getLoanAmount(),
+                loan.getPropertyAddress(),
+                loan.getStatus(),
+                loan.getCreatedAt()
         );
     }
 
