@@ -218,6 +218,105 @@ public class LoanService {
         return detail;
     }
 
+    // Transitions a loan to a new status if the transition is valid and user is authorized.
+    // Writes an AuditLog entry on success.
+    // Returns the updated LoanApplicationDTO, or throws exception on invalid transition/role.
+    public LoanApplicationDTO transitionLoanStatus(Long loanId, Long userId, String userRole, String toStatusStr) {
+        LoanApplication loan = loanApplicationRepository.findById(loanId)
+                .orElseThrow(() -> new IllegalArgumentException("Loan not found"));
+
+        LoanStatus toStatus = LoanStatus.valueOf(toStatusStr);
+        LoanStatus fromStatus = loan.getStatus();
+
+        // Validate the transition and check role authorization.
+        validateTransition(fromStatus, toStatus, userRole);
+
+        // Update status and timestamp.
+        loan.setStatus(toStatus);
+        LoanApplication updatedLoan = loanApplicationRepository.save(loan);
+
+        // Get the User entity for AuditLog.
+        User changedBy = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        // Write AuditLog entry.
+        AuditLog auditLog = AuditLog.builder()
+                .loanApplication(updatedLoan)
+                .changedBy(changedBy)
+                .fromStatus(fromStatus.toString())
+                .toStatus(toStatus.toString())
+                .notes("Status changed from " + fromStatus + " to " + toStatus)
+                .build();
+
+        auditLogRepository.save(auditLog);
+
+        return new LoanApplicationDTO(
+                updatedLoan.getId(),
+                updatedLoan.getLoanAmount(),
+                updatedLoan.getPropertyAddress(),
+                updatedLoan.getStatus(),
+                updatedLoan.getCreatedAt()
+        );
+    }
+
+    // Validates if a status transition is legal and if the user's role allows it.
+    // Throws IllegalArgumentException if invalid.
+    private void validateTransition(LoanStatus fromStatus, LoanStatus toStatus, String userRole) {
+        switch (fromStatus) {
+            case APPLIED:
+                if (toStatus != LoanStatus.UNDER_REVIEW) {
+                    throw new IllegalArgumentException("From APPLIED, can only transition to UNDER_REVIEW");
+                }
+                if (!"CREDIT_OFFICER".equals(userRole)) {
+                    throw new IllegalArgumentException("Only CREDIT_OFFICER can move loan from APPLIED to UNDER_REVIEW");
+                }
+                break;
+
+            case UNDER_REVIEW:
+                if (toStatus != LoanStatus.ASSESSED) {
+                    throw new IllegalArgumentException("From UNDER_REVIEW, can only transition to ASSESSED");
+                }
+                if (!"APPRAISER".equals(userRole)) {
+                    throw new IllegalArgumentException("Only APPRAISER can move loan from UNDER_REVIEW to ASSESSED");
+                }
+                break;
+
+            case ASSESSED:
+                if (toStatus != LoanStatus.APPROVED && toStatus != LoanStatus.REJECTED) {
+                    throw new IllegalArgumentException("From ASSESSED, can only transition to APPROVED or REJECTED");
+                }
+                if (!"UNDERWRITER".equals(userRole)) {
+                    throw new IllegalArgumentException("Only UNDERWRITER can move loan from ASSESSED to " + toStatus);
+                }
+                break;
+
+            case APPROVED:
+                if (toStatus != LoanStatus.LEGAL_REVIEW) {
+                    throw new IllegalArgumentException("From APPROVED, can only transition to LEGAL_REVIEW");
+                }
+                if (!"LEGAL".equals(userRole)) {
+                    throw new IllegalArgumentException("Only LEGAL can move loan from APPROVED to LEGAL_REVIEW");
+                }
+                break;
+
+            case LEGAL_REVIEW:
+                if (toStatus != LoanStatus.DISBURSED) {
+                    throw new IllegalArgumentException("From LEGAL_REVIEW, can only transition to DISBURSED");
+                }
+                if (!"DISBURSEMENT".equals(userRole)) {
+                    throw new IllegalArgumentException("Only DISBURSEMENT can move loan from LEGAL_REVIEW to DISBURSED");
+                }
+                break;
+
+            case REJECTED:
+            case DISBURSED:
+                throw new IllegalArgumentException("Loan in " + fromStatus + " status cannot be transitioned");
+
+            default:
+                throw new IllegalArgumentException("Unknown status: " + fromStatus);
+        }
+    }
+
     // Determines if a user can view a loan based on their role and the loan's status.
     private boolean isAuthorizedToViewLoan(Long userId, String userRole, LoanApplication loan) {
         switch (userRole) {

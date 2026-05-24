@@ -4,11 +4,13 @@ import com.loanorigination.loanservice.dto.CreateLoanRequest;
 import com.loanorigination.loanservice.dto.LoanApplicationDTO;
 import com.loanorigination.loanservice.dto.LoanDetailDTO;
 import com.loanorigination.loanservice.dto.LoanSummaryDTO;
+import com.loanorigination.loanservice.dto.UpdateLoanStatusRequest;
 import com.loanorigination.loanservice.service.LoanService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -92,6 +94,24 @@ public class LoanController {
         }
 
         return ResponseEntity.ok(detail);
+    }
+
+    // PATCH /api/loans/{id}/status — Update loan status with validation and audit logging.
+    // Validates the transition is legal per the state machine and user has the right role.
+    // Returns 200 with updated loan, 400 for invalid transition, 404 for not found.
+    @PatchMapping("/{id}/status")
+    public ResponseEntity<LoanApplicationDTO> updateLoanStatus(
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateLoanStatusRequest request,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole) {
+
+        try {
+            LoanApplicationDTO updatedLoan = loanService.transitionLoanStatus(id, userId, userRole, request.getToStatus());
+            return ResponseEntity.ok(updatedLoan);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        }
     }
 }
 
