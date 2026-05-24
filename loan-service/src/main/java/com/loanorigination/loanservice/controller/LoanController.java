@@ -4,6 +4,7 @@ import com.loanorigination.loanservice.dto.CreateLoanRequest;
 import com.loanorigination.loanservice.dto.LoanApplicationDTO;
 import com.loanorigination.loanservice.dto.LoanDetailDTO;
 import com.loanorigination.loanservice.dto.LoanSummaryDTO;
+import com.loanorigination.loanservice.dto.PropertyAssessmentRequest;
 import com.loanorigination.loanservice.dto.UpdateLoanStatusRequest;
 import com.loanorigination.loanservice.service.LoanService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -109,6 +110,25 @@ public class LoanController {
         try {
             LoanApplicationDTO updatedLoan = loanService.transitionLoanStatus(id, userId, userRole, request.getToStatus());
             return ResponseEntity.ok(updatedLoan);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    // POST /api/loans/{id}/assessment — APPRAISER submits property assessment.
+    // Assessment must have assessed value. Loan must be in UNDER_REVIEW status.
+    // Transitions loan to ASSESSED and writes AuditLog.
+    // Returns 201 with updated loan, 400 if invalid state/role, 404 if not found.
+    @PostMapping("/{id}/assessment")
+    public ResponseEntity<LoanApplicationDTO> submitAssessment(
+            @PathVariable Long id,
+            @Valid @RequestBody PropertyAssessmentRequest request,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole) {
+
+        try {
+            LoanApplicationDTO updatedLoan = loanService.submitAssessment(id, userId, userRole, request);
+            return ResponseEntity.status(HttpStatus.CREATED).body(updatedLoan);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
         }

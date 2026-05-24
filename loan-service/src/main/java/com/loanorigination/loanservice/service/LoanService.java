@@ -4,6 +4,7 @@ import com.loanorigination.loanservice.dto.CreateLoanRequest;
 import com.loanorigination.loanservice.dto.LoanApplicationDTO;
 import com.loanorigination.loanservice.dto.LoanDetailDTO;
 import com.loanorigination.loanservice.dto.LoanSummaryDTO;
+import com.loanorigination.loanservice.dto.PropertyAssessmentRequest;
 import com.loanorigination.loanservice.entity.AuditLog;
 import com.loanorigination.loanservice.entity.Borrower;
 import com.loanorigination.loanservice.entity.LoanApplication;
@@ -216,6 +217,57 @@ public class LoanService {
         }
 
         return detail;
+    }
+
+    // APPRAISER submits a property assessment for a loan in UNDER_REVIEW state.
+    // Creates PropertyAssessment, transitions loan to ASSESSED, and writes AuditLog.
+    // Throws IllegalArgumentException if loan not found, not in UNDER_REVIEW, or user is not APPRAISER.
+    public LoanApplicationDTO submitAssessment(Long loanId, Long userId, String userRole, PropertyAssessmentRequest request) {
+        if (!"APPRAISER".equals(userRole)) {
+            throw new IllegalArgumentException("Only APPRAISER can submit assessments");
+        }
+
+        LoanApplication loan = loanApplicationRepository.findById(loanId)
+                .orElseThrow(() -> new IllegalArgumentException("Loan not found"));
+
+        if (loan.getStatus() != LoanStatus.UNDER_REVIEW) {
+            throw new IllegalArgumentException("Loan must be in UNDER_REVIEW status to submit assessment");
+        }
+
+        User appraiser = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        // Create PropertyAssessment.
+        PropertyAssessment assessment = PropertyAssessment.builder()
+                .loanApplication(loan)
+                .appraiser(appraiser)
+                .assessedValue(request.getAssessedValue())
+                .build();
+
+        propertyAssessmentRepository.save(assessment);
+
+        // Transition loan to ASSESSED.
+        loan.setStatus(LoanStatus.ASSESSED);
+        LoanApplication updatedLoan = loanApplicationRepository.save(loan);
+
+        // Write AuditLog.
+        AuditLog auditLog = AuditLog.builder()
+                .loanApplication(updatedLoan)
+                .changedBy(appraiser)
+                .fromStatus(LoanStatus.UNDER_REVIEW.toString())
+                .toStatus(LoanStatus.ASSESSED.toString())
+                .notes("Property assessment submitted")
+                .build();
+
+        auditLogRepository.save(auditLog);
+
+        return new LoanApplicationDTO(
+                updatedLoan.getId(),
+                updatedLoan.getLoanAmount(),
+                updatedLoan.getPropertyAddress(),
+                updatedLoan.getStatus(),
+                updatedLoan.getCreatedAt()
+        );
     }
 
     // Transitions a loan to a new status if the transition is valid and user is authorized.
