@@ -5,6 +5,7 @@ import com.loanorigination.loanservice.dto.LoanApplicationDTO;
 import com.loanorigination.loanservice.dto.LoanDetailDTO;
 import com.loanorigination.loanservice.dto.LoanSummaryDTO;
 import com.loanorigination.loanservice.dto.PropertyAssessmentRequest;
+import com.loanorigination.loanservice.dto.UnderwritingDecisionRequest;
 import com.loanorigination.loanservice.entity.AuditLog;
 import com.loanorigination.loanservice.entity.Borrower;
 import com.loanorigination.loanservice.entity.LoanApplication;
@@ -257,6 +258,59 @@ public class LoanService {
                 .fromStatus(LoanStatus.UNDER_REVIEW.toString())
                 .toStatus(LoanStatus.ASSESSED.toString())
                 .notes("Property assessment submitted")
+                .build();
+
+        auditLogRepository.save(auditLog);
+
+        return new LoanApplicationDTO(
+                updatedLoan.getId(),
+                updatedLoan.getLoanAmount(),
+                updatedLoan.getPropertyAddress(),
+                updatedLoan.getStatus(),
+                updatedLoan.getCreatedAt()
+        );
+    }
+
+    // UNDERWRITER submits an underwriting decision (APPROVED or REJECTED) for a loan in ASSESSED state.
+    // Creates UnderwritingDecision, transitions loan to APPROVED or REJECTED, and writes AuditLog.
+    // Throws IllegalArgumentException if loan not found, not in ASSESSED, or user is not UNDERWRITER.
+    public LoanApplicationDTO submitDecision(Long loanId, Long userId, String userRole, UnderwritingDecisionRequest request) {
+        if (!"UNDERWRITER".equals(userRole)) {
+            throw new IllegalArgumentException("Only UNDERWRITER can submit decisions");
+        }
+
+        LoanApplication loan = loanApplicationRepository.findById(loanId)
+                .orElseThrow(() -> new IllegalArgumentException("Loan not found"));
+
+        if (loan.getStatus() != LoanStatus.ASSESSED) {
+            throw new IllegalArgumentException("Loan must be in ASSESSED status to submit decision");
+        }
+
+        User underwriter = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        // Create UnderwritingDecision.
+        UnderwritingDecision decision = UnderwritingDecision.builder()
+                .loanApplication(loan)
+                .underwriter(underwriter)
+                .decision(request.getDecision())
+                .notes(request.getNotes())
+                .build();
+
+        underwritingDecisionRepository.save(decision);
+
+        // Transition loan to APPROVED or REJECTED based on decision.
+        LoanStatus newStatus = "APPROVED".equals(request.getDecision()) ? LoanStatus.APPROVED : LoanStatus.REJECTED;
+        loan.setStatus(newStatus);
+        LoanApplication updatedLoan = loanApplicationRepository.save(loan);
+
+        // Write AuditLog.
+        AuditLog auditLog = AuditLog.builder()
+                .loanApplication(updatedLoan)
+                .changedBy(underwriter)
+                .fromStatus(LoanStatus.ASSESSED.toString())
+                .toStatus(newStatus.toString())
+                .notes("Underwriting decision: " + request.getDecision())
                 .build();
 
         auditLogRepository.save(auditLog);

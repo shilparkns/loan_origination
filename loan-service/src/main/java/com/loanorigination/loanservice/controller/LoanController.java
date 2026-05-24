@@ -5,6 +5,7 @@ import com.loanorigination.loanservice.dto.LoanApplicationDTO;
 import com.loanorigination.loanservice.dto.LoanDetailDTO;
 import com.loanorigination.loanservice.dto.LoanSummaryDTO;
 import com.loanorigination.loanservice.dto.PropertyAssessmentRequest;
+import com.loanorigination.loanservice.dto.UnderwritingDecisionRequest;
 import com.loanorigination.loanservice.dto.UpdateLoanStatusRequest;
 import com.loanorigination.loanservice.service.LoanService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -128,6 +129,25 @@ public class LoanController {
 
         try {
             LoanApplicationDTO updatedLoan = loanService.submitAssessment(id, userId, userRole, request);
+            return ResponseEntity.status(HttpStatus.CREATED).body(updatedLoan);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    // POST /api/loans/{id}/decision — UNDERWRITER submits underwriting decision.
+    // Decision must be APPROVED or REJECTED. Loan must be in ASSESSED status.
+    // Transitions loan to APPROVED or REJECTED accordingly and writes AuditLog.
+    // Returns 201 with updated loan, 400 if invalid state/role, 404 if not found.
+    @PostMapping("/{id}/decision")
+    public ResponseEntity<LoanApplicationDTO> submitDecision(
+            @PathVariable Long id,
+            @Valid @RequestBody UnderwritingDecisionRequest request,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole) {
+
+        try {
+            LoanApplicationDTO updatedLoan = loanService.submitDecision(id, userId, userRole, request);
             return ResponseEntity.status(HttpStatus.CREATED).body(updatedLoan);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
