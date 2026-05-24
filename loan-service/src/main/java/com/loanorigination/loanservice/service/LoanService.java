@@ -15,6 +15,7 @@ import com.loanorigination.loanservice.entity.PropertyAssessment;
 import com.loanorigination.loanservice.entity.UnderwritingDecision;
 import com.loanorigination.loanservice.entity.User;
 import com.loanorigination.loanservice.enums.LoanStatus;
+import com.loanorigination.loanservice.event.LoanStatusEvent;
 import com.loanorigination.loanservice.repository.AuditLogRepository;
 import com.loanorigination.loanservice.repository.BorrowerRepository;
 import com.loanorigination.loanservice.repository.LoanApplicationRepository;
@@ -25,6 +26,7 @@ import com.loanorigination.loanservice.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -40,6 +42,7 @@ public class LoanService {
     private final PropertyAssessmentRepository propertyAssessmentRepository;
     private final UnderwritingDecisionRepository underwritingDecisionRepository;
     private final LoanDocumentRepository loanDocumentRepository;
+    private final KafkaProducerService kafkaProducerService;
 
     @Autowired
     public LoanService(LoanApplicationRepository loanApplicationRepository,
@@ -48,7 +51,8 @@ public class LoanService {
                        UserRepository userRepository,
                        PropertyAssessmentRepository propertyAssessmentRepository,
                        UnderwritingDecisionRepository underwritingDecisionRepository,
-                       LoanDocumentRepository loanDocumentRepository) {
+                       LoanDocumentRepository loanDocumentRepository,
+                       KafkaProducerService kafkaProducerService) {
         this.loanApplicationRepository = loanApplicationRepository;
         this.borrowerRepository = borrowerRepository;
         this.auditLogRepository = auditLogRepository;
@@ -56,6 +60,7 @@ public class LoanService {
         this.propertyAssessmentRepository = propertyAssessmentRepository;
         this.underwritingDecisionRepository = underwritingDecisionRepository;
         this.loanDocumentRepository = loanDocumentRepository;
+        this.kafkaProducerService = kafkaProducerService;
     }
 
     // BORROWER submits a new loan application.
@@ -264,6 +269,9 @@ public class LoanService {
 
         auditLogRepository.save(auditLog);
 
+        // Publish event to Kafka.
+        publishLoanStatusEvent(LoanStatus.UNDER_REVIEW, LoanStatus.ASSESSED, appraiser, updatedLoan.getId());
+
         return new LoanApplicationDTO(
                 updatedLoan.getId(),
                 updatedLoan.getLoanAmount(),
@@ -316,6 +324,9 @@ public class LoanService {
                 .build();
 
         auditLogRepository.save(auditLog);
+
+        // Publish event to Kafka.
+        publishLoanStatusEvent(LoanStatus.ASSESSED, newStatus, underwriter, updatedLoan.getId());
 
         return new LoanApplicationDTO(
                 updatedLoan.getId(),
@@ -396,6 +407,9 @@ public class LoanService {
 
         auditLogRepository.save(auditLog);
 
+        // Publish event to Kafka.
+        publishLoanStatusEvent(LoanStatus.LEGAL_REVIEW, LoanStatus.DISBURSED, disbursementOfficer, updatedLoan.getId());
+
         return new LoanApplicationDTO(
                 updatedLoan.getId(),
                 updatedLoan.getLoanAmount(),
@@ -436,6 +450,9 @@ public class LoanService {
                 .build();
 
         auditLogRepository.save(auditLog);
+
+        // Publish event to Kafka.
+        publishLoanStatusEvent(fromStatus, toStatus, changedBy, updatedLoan.getId());
 
         return new LoanApplicationDTO(
                 updatedLoan.getId(),
@@ -523,6 +540,39 @@ public class LoanService {
                 return true;
             default:
                 return false;
+        }
+    }
+
+    // Helper: Publish a LoanStatusEvent to Kafka after status transition.
+    private void publishLoanStatusEvent(LoanStatus fromStatus, LoanStatus toStatus, User changedByUser, Long loanId) {
+        LoanStatusEvent event = new LoanStatusEvent();
+        event.setLoanId(loanId);
+        event.setFromStatus(fromStatus.toString());
+        event.setToStatus(toStatus.toString());
+        event.setChangedBy(changedByUser.getEmail());
+        event.setTimestamp(LocalDateTime.now());
+        event.setNotifyRole(computeNotifyRole(toStatus));
+
+        kafkaProducerService.publish(event);
+    }
+
+    // Helper: Compute which role should be notified based on the new status.
+    // Maps toStatus → notifyRole per the spec state machine.
+    private String computeNotifyRole(LoanStatus toStatus) {
+        switch (toStatus) {
+            case UNDER_REVIEW:
+                return "CREDIT_OFFICER";
+            case ASSESSED:
+                return "APPRAISER";
+            case APPROVED:
+            case REJECTED:
+                return "UNDERWRITER";
+            case LEGAL_REVIEW:
+                return "LEGAL";
+            case DISBURSED:
+                return "DISBURSEMENT";
+            default:
+                return null;
         }
     }
 }
