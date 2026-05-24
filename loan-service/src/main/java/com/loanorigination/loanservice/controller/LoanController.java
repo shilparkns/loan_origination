@@ -28,7 +28,7 @@ public class LoanController {
     }
 
     // POST /api/loans — BORROWER submits a new loan application.
-    // Reads X-User-Id and X-User-Role headers (set by JwtFilter).
+    // Reads X-User-Id and X-User-Role headers (set by api-gateway).
     // @Valid ensures CreateLoanRequest passes validation (loanAmount > 0, propertyAddress not blank).
     // Returns 201 Created with the created loan details.
     @PostMapping
