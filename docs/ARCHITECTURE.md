@@ -229,6 +229,91 @@ LoanApplicationDTO (response):
 
 ---
 
+## 11. Independent Service Ownership: No Shared Libraries
+
+**Decision:** notification-service has its own copy of LoanStatusEvent (not imported from loan-service). Each service owns its data models.
+
+**Why:**
+- **Decoupling:** Services don't depend on each other's libraries
+- **Independent Deployment:** Can upgrade notification-service without redeploying loan-service
+- **Evolution:** Each service can evolve its event format without affecting the other
+- **Clear Boundaries:** No hidden dependencies between services
+
+**Trade-off:**
+- Code duplication: LoanStatusEvent exists in two places
+- Must maintain parity manually (if one changes, update both)
+
+---
+
+## 12. Consumer Groups for Independent Processing
+
+**Decision:** Two consumer groups (`reporting-group`, `notification-group`) both listen to the same `loan-status-changes` topic.
+
+**Why:**
+- **Independent Scaling:** ReportingConsumer and NotificationConsumer scale independently
+- **Different SLAs:** One can be slower without blocking the other
+- **Independent Offsets:** Each group tracks its own consumption position in Kafka
+- **Easy to Add New Consumers:** Add a new group (e.g., `analytics-group`) without affecting existing ones
+
+**Pattern:**
+```
+Topic: loan-status-changes
+├─ reporting-group (ReportingConsumer)
+│  └─ Persists to loan_status_events table (audit trail)
+└─ notification-group (NotificationConsumer)
+   └─ Sends notifications (simulated via logging)
+```
+
+**Why NOT a single group:**
+- If combined, they'd share offset offsets and load-balance messages
+- One couldn't retry independently if it failed
+
+---
+
+## 13. Idempotency in Consumers: Deduplication by (Key, Field)
+
+**Decision:** Each consumer checks if the message was already processed before inserting.
+
+**ReportingConsumer:** Dedup by `(loanId, toStatus)`
+```java
+// Check: does a record with this loanId and toStatus already exist?
+repository.findByLoanIdAndToStatus(event.getLoanId(), event.getToStatus())
+    .ifPresentOrElse(existing -> {}, () -> insert());
+```
+
+**NotificationConsumer:** Dedup by `(loanId, notifyRole)`
+
+**Why:**
+- **Kafka Delivery:** Kafka guarantees "at least once" (not exactly once)
+- **Duplicate Events:** If broker fails, same message may be redelivered
+- **No Duplicate Rows:** Idempotency ensures each unique state change is recorded once
+
+**Trade-off:**
+- Extra query per message (small cost for correctness)
+- If dedup key is wrong (e.g., using only loanId), duplicate messages silently drop
+
+---
+
+## 14. Kafka Deserialization: Ignore Type Info, Use Default Type
+
+**Decision:** Configure `JsonDeserializer.USE_TYPE_INFO_HEADERS = false` and set `VALUE_DEFAULT_TYPE` to notification-service's LoanStatusEvent.
+
+**Why:**
+- **Class Mismatch:** Kafka message contains `com.loanorigination.loanservice.event.LoanStatusEvent` (producer's class)
+- **notification-service Expects:** `com.loanorigination.notificationservice.event.LoanStatusEvent` (its own class)
+- **Solution:** Tell deserializer "ignore the type in the message, always use my LoanStatusEvent class"
+
+**Without this:**
+```
+ClassNotFoundException: com.loanorigination.loanservice.event.LoanStatusEvent
+```
+
+**Trade-off:**
+- Deserializer assumes all messages in the topic are the same type
+- Can't handle polymorphic messages (multiple types in one topic)
+
+---
+
 ## Future Decisions to Document
 
 - Authentication/Authorization in api-gateway-service
