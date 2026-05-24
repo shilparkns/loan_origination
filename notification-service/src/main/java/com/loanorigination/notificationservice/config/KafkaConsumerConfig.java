@@ -37,6 +37,7 @@ public class KafkaConsumerConfig {
         configProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
         configProps.put(JsonDeserializer.VALUE_DEFAULT_TYPE, LoanStatusEvent.class.getName());
         configProps.put(JsonDeserializer.TRUSTED_PACKAGES, "*");
+        configProps.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
         configProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         return new DefaultKafkaConsumerFactory<>(configProps);
     }
@@ -44,8 +45,7 @@ public class KafkaConsumerConfig {
     // Container factory for reporting-group.
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, LoanStatusEvent> reportingKafkaListenerContainerFactory() {
-        ConcurrentKafkaListenerContainerFactory<String, LoanStatusEvent> factory =
-                new ConcurrentKafkaListenerContainerFactory<>();
+        ConcurrentKafkaListenerContainerFactory<String, LoanStatusEvent> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory());
         return factory;
     }
@@ -53,8 +53,7 @@ public class KafkaConsumerConfig {
     // Container factory for notification-group.
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, LoanStatusEvent> notificationKafkaListenerContainerFactory() {
-        ConcurrentKafkaListenerContainerFactory<String, LoanStatusEvent> factory =
-                new ConcurrentKafkaListenerContainerFactory<>();
+        ConcurrentKafkaListenerContainerFactory<String, LoanStatusEvent> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory());
         return factory;
     }
