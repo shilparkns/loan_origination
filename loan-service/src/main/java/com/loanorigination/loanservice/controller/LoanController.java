@@ -173,5 +173,22 @@ public class LoanController {
             return ResponseEntity.badRequest().build();
         }
     }
+
+    // PATCH /api/loans/{id}/disburse — DISBURSEMENT moves loan to DISBURSED.
+    // Loan must be in LEGAL_REVIEW status. Transitions to DISBURSED and writes AuditLog.
+    // Returns 200 with updated loan, 400 if invalid state/role, 404 if not found.
+    @PatchMapping("/{id}/disburse")
+    public ResponseEntity<LoanApplicationDTO> disburseLoan(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole) {
+
+        try {
+            LoanApplicationDTO updatedLoan = loanService.disburseLoan(id, userId, userRole);
+            return ResponseEntity.ok(updatedLoan);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
 }
 

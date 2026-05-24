@@ -364,6 +364,47 @@ public class LoanService {
         );
     }
 
+    // DISBURSEMENT moves a loan from LEGAL_REVIEW to DISBURSED and writes AuditLog.
+    // Throws IllegalArgumentException if loan not found, not in LEGAL_REVIEW, or user is not DISBURSEMENT.
+    public LoanApplicationDTO disburseLoan(Long loanId, Long userId, String userRole) {
+        if (!"DISBURSEMENT".equals(userRole)) {
+            throw new IllegalArgumentException("Only DISBURSEMENT can disburse loans");
+        }
+
+        LoanApplication loan = loanApplicationRepository.findById(loanId)
+                .orElseThrow(() -> new IllegalArgumentException("Loan not found"));
+
+        if (loan.getStatus() != LoanStatus.LEGAL_REVIEW) {
+            throw new IllegalArgumentException("Loan must be in LEGAL_REVIEW status to disburse");
+        }
+
+        User disbursementOfficer = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        // Transition loan to DISBURSED.
+        loan.setStatus(LoanStatus.DISBURSED);
+        LoanApplication updatedLoan = loanApplicationRepository.save(loan);
+
+        // Write AuditLog.
+        AuditLog auditLog = AuditLog.builder()
+                .loanApplication(updatedLoan)
+                .changedBy(disbursementOfficer)
+                .fromStatus(LoanStatus.LEGAL_REVIEW.toString())
+                .toStatus(LoanStatus.DISBURSED.toString())
+                .notes("Loan disbursed")
+                .build();
+
+        auditLogRepository.save(auditLog);
+
+        return new LoanApplicationDTO(
+                updatedLoan.getId(),
+                updatedLoan.getLoanAmount(),
+                updatedLoan.getPropertyAddress(),
+                updatedLoan.getStatus(),
+                updatedLoan.getCreatedAt()
+        );
+    }
+
     // Transitions a loan to a new status if the transition is valid and user is authorized.
     // Writes an AuditLog entry on success.
     // Returns the updated LoanApplicationDTO, or throws exception on invalid transition/role.
