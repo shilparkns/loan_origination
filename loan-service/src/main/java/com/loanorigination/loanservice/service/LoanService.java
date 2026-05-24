@@ -2,15 +2,21 @@ package com.loanorigination.loanservice.service;
 
 import com.loanorigination.loanservice.dto.CreateLoanRequest;
 import com.loanorigination.loanservice.dto.LoanApplicationDTO;
+import com.loanorigination.loanservice.dto.LoanDetailDTO;
 import com.loanorigination.loanservice.dto.LoanSummaryDTO;
 import com.loanorigination.loanservice.entity.AuditLog;
 import com.loanorigination.loanservice.entity.Borrower;
 import com.loanorigination.loanservice.entity.LoanApplication;
+import com.loanorigination.loanservice.entity.PropertyAssessment;
+import com.loanorigination.loanservice.entity.UnderwritingDecision;
 import com.loanorigination.loanservice.entity.User;
 import com.loanorigination.loanservice.enums.LoanStatus;
 import com.loanorigination.loanservice.repository.AuditLogRepository;
 import com.loanorigination.loanservice.repository.BorrowerRepository;
 import com.loanorigination.loanservice.repository.LoanApplicationRepository;
+import com.loanorigination.loanservice.repository.LoanDocumentRepository;
+import com.loanorigination.loanservice.repository.PropertyAssessmentRepository;
+import com.loanorigination.loanservice.repository.UnderwritingDecisionRepository;
 import com.loanorigination.loanservice.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -27,16 +33,25 @@ public class LoanService {
     private final BorrowerRepository borrowerRepository;
     private final AuditLogRepository auditLogRepository;
     private final UserRepository userRepository;
+    private final PropertyAssessmentRepository propertyAssessmentRepository;
+    private final UnderwritingDecisionRepository underwritingDecisionRepository;
+    private final LoanDocumentRepository loanDocumentRepository;
 
     @Autowired
     public LoanService(LoanApplicationRepository loanApplicationRepository,
                        BorrowerRepository borrowerRepository,
                        AuditLogRepository auditLogRepository,
-                       UserRepository userRepository) {
+                       UserRepository userRepository,
+                       PropertyAssessmentRepository propertyAssessmentRepository,
+                       UnderwritingDecisionRepository underwritingDecisionRepository,
+                       LoanDocumentRepository loanDocumentRepository) {
         this.loanApplicationRepository = loanApplicationRepository;
         this.borrowerRepository = borrowerRepository;
         this.auditLogRepository = auditLogRepository;
         this.userRepository = userRepository;
+        this.propertyAssessmentRepository = propertyAssessmentRepository;
+        this.underwritingDecisionRepository = underwritingDecisionRepository;
+        this.loanDocumentRepository = loanDocumentRepository;
     }
 
     // BORROWER submits a new loan application.
@@ -140,6 +155,89 @@ public class LoanService {
                         loan.getStatus()
                 ))
                 .collect(Collectors.toList());
+    }
+
+    // Fetches a single loan with full details (borrower, assessment, decision, documents).
+    // Applies same role-based visibility rules as getLoansByRole.
+    // Returns null if loan not found or user is not authorized to view it.
+    public LoanDetailDTO getLoanDetailById(Long loanId, Long userId, String userRole) {
+        LoanApplication loan = loanApplicationRepository.findByIdWithBorrower(loanId).orElse(null);
+        if (loan == null) {
+            return null;
+        }
+
+        // Check authorization: user must be able to see this loan based on role and status.
+        boolean authorized = isAuthorizedToViewLoan(userId, userRole, loan);
+        if (!authorized) {
+            return null;
+        }
+
+        // Fetch related data (optional — may not exist yet).
+        PropertyAssessment assessment = propertyAssessmentRepository.findByLoanApplicationId(loanId).orElse(null);
+        UnderwritingDecision decision = underwritingDecisionRepository.findByLoanApplicationId(loanId).orElse(null);
+        var documents = loanDocumentRepository.findByLoanApplicationId(loanId);
+
+        // Build LoanDetailDTO.
+        LoanDetailDTO detail = new LoanDetailDTO();
+        detail.setId(loan.getId());
+        detail.setLoanAmount(loan.getLoanAmount());
+        detail.setPropertyAddress(loan.getPropertyAddress());
+        detail.setStatus(loan.getStatus());
+        detail.setCreatedAt(loan.getCreatedAt());
+
+        // Borrower info.
+        Borrower borrower = loan.getBorrower();
+        detail.setBorrowerFirstName(borrower.getFirstName());
+        detail.setBorrowerLastName(borrower.getLastName());
+        detail.setBorrowerEmail(borrower.getEmail());
+        detail.setBorrowerPhone(borrower.getPhone());
+        detail.setBorrowerCreditScore(borrower.getCreditScore());
+        detail.setBorrowerAnnualIncome(borrower.getAnnualIncome());
+
+        // Assessment (if exists).
+        if (assessment != null) {
+            detail.setAssessedValue(assessment.getAssessedValue());
+            detail.setAssessedAt(assessment.getAssessedAt());
+        }
+
+        // Decision (if exists).
+        if (decision != null) {
+            detail.setUnderwritingDecision(decision.getDecision());
+            detail.setDecisionNotes(decision.getNotes());
+            detail.setDecidedAt(decision.getDecidedAt());
+        }
+
+        // Documents.
+        if (!documents.isEmpty()) {
+            var docSummaries = documents.stream()
+                    .map(doc -> new LoanDetailDTO.DocumentSummary(doc.getId(), doc.getFilePath()))
+                    .collect(Collectors.toList());
+            detail.setDocuments(docSummaries);
+        }
+
+        return detail;
+    }
+
+    // Determines if a user can view a loan based on their role and the loan's status.
+    private boolean isAuthorizedToViewLoan(Long userId, String userRole, LoanApplication loan) {
+        switch (userRole) {
+            case "BORROWER":
+                return loan.getBorrower().getUser().getId().equals(userId);
+            case "CREDIT_OFFICER":
+                return loan.getStatus() == LoanStatus.APPLIED;
+            case "APPRAISER":
+                return loan.getStatus() == LoanStatus.UNDER_REVIEW;
+            case "UNDERWRITER":
+                return loan.getStatus() == LoanStatus.ASSESSED;
+            case "LEGAL":
+                return loan.getStatus() == LoanStatus.APPROVED;
+            case "DISBURSEMENT":
+                return loan.getStatus() == LoanStatus.LEGAL_REVIEW;
+            case "ADMIN":
+                return true;
+            default:
+                return false;
+        }
     }
 }
 

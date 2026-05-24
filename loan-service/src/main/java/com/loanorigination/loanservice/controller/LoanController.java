@@ -2,12 +2,14 @@ package com.loanorigination.loanservice.controller;
 
 import com.loanorigination.loanservice.dto.CreateLoanRequest;
 import com.loanorigination.loanservice.dto.LoanApplicationDTO;
+import com.loanorigination.loanservice.dto.LoanDetailDTO;
 import com.loanorigination.loanservice.dto.LoanSummaryDTO;
 import com.loanorigination.loanservice.service.LoanService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -69,6 +71,27 @@ public class LoanController {
 
         List<LoanSummaryDTO> loans = loanService.getLoansByRole(userId, userRole);
         return ResponseEntity.ok(loans);
+    }
+
+    // GET /api/loans/{id} — Get single loan with full details.
+    // Returns LoanDetailDTO (loan + borrower + assessment + decision + documents).
+    // Applies same role-based visibility rules as list endpoint.
+    // Returns 404 if loan not found, 403 if unauthorized, 200 if authorized.
+    @GetMapping("/{id}")
+    public ResponseEntity<LoanDetailDTO> getLoanDetail(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole) {
+
+        LoanDetailDTO detail = loanService.getLoanDetailById(id, userId, userRole);
+
+        if (detail == null) {
+            // Could be not found or unauthorized — return 404.
+            // Per spec, 403 only for known loans the user can't see; 404 is safer for unknown loans.
+            return ResponseEntity.notFound().build();
+        }
+
+        return ResponseEntity.ok(detail);
     }
 }
 

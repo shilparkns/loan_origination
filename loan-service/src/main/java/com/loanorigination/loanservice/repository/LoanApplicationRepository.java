@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface LoanApplicationRepository extends JpaRepository<LoanApplication, Long> {
     List<LoanApplication> findByStatus(LoanStatus status);
@@ -20,5 +21,8 @@ public interface LoanApplicationRepository extends JpaRepository<LoanApplication
 
     @Query("SELECT l FROM LoanApplication l JOIN FETCH l.borrower")
     List<LoanApplication> findAllWithBorrower();
+
+    @Query("SELECT l FROM LoanApplication l JOIN FETCH l.borrower WHERE l.id = :id")
+    Optional<LoanApplication> findByIdWithBorrower(@Param("id") Long id);
 }
 
