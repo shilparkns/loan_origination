@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: auth-service
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate
+  datasource:
+    url: jdbc:postgresql://localhost:5434/authdb
+    username: authuser
+    password: authpass
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: 8083
+
+jwt:
+  secret: your-secret-key-min-32-characters-long-12345
+  expiration: 86400000
