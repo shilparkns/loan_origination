@@ -18,6 +18,5 @@ server:
   port: 8083
 
 jwt:
-  secret: your-secret-key-min-32-characters-long-12345
+  secret: loan-origination-secret-key-must-be-at-least-256-bits-long-for-hs256
   expiration-ms: 86400000
-
