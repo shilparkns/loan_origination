@@ -15,7 +15,6 @@ import com.loanorigination.loanservice.entity.LoanApplication;
 import com.loanorigination.loanservice.entity.LoanDocument;
 import com.loanorigination.loanservice.entity.PropertyAssessment;
 import com.loanorigination.loanservice.entity.UnderwritingDecision;
-import com.loanorigination.loanservice.entity.User;
 import com.loanorigination.loanservice.enums.LoanStatus;
 import com.loanorigination.loanservice.event.LoanStatusEvent;
 import com.loanorigination.loanservice.repository.AuditLogRepository;
@@ -24,7 +23,6 @@ import com.loanorigination.loanservice.repository.LoanApplicationRepository;
 import com.loanorigination.loanservice.repository.LoanDocumentRepository;
 import com.loanorigination.loanservice.repository.PropertyAssessmentRepository;
 import com.loanorigination.loanservice.repository.UnderwritingDecisionRepository;
-import com.loanorigination.loanservice.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -40,7 +38,6 @@ public class LoanService {
     private final LoanApplicationRepository loanApplicationRepository;
     private final BorrowerRepository borrowerRepository;
     private final AuditLogRepository auditLogRepository;
-    private final UserRepository userRepository;
     private final PropertyAssessmentRepository propertyAssessmentRepository;
     private final UnderwritingDecisionRepository underwritingDecisionRepository;
     private final LoanDocumentRepository loanDocumentRepository;
@@ -51,7 +48,6 @@ public class LoanService {
     public LoanService(LoanApplicationRepository loanApplicationRepository,
                        BorrowerRepository borrowerRepository,
                        AuditLogRepository auditLogRepository,
-                       UserRepository userRepository,
                        PropertyAssessmentRepository propertyAssessmentRepository,
                        UnderwritingDecisionRepository underwritingDecisionRepository,
                        LoanDocumentRepository loanDocumentRepository,
@@ -60,7 +56,6 @@ public class LoanService {
         this.loanApplicationRepository = loanApplicationRepository;
         this.borrowerRepository = borrowerRepository;
         this.auditLogRepository = auditLogRepository;
-        this.userRepository = userRepository;
         this.propertyAssessmentRepository = propertyAssessmentRepository;
         this.underwritingDecisionRepository = underwritingDecisionRepository;
         this.loanDocumentRepository = loanDocumentRepository;
@@ -83,6 +78,7 @@ public class LoanService {
         // Create the LoanApplication with APPLIED status.
         LoanApplication loanApplication = LoanApplication.builder()
                 .borrower(borrower)
+                .createdById(userId)
                 .loanAmount(request.getLoanAmount())
                 .propertyAddress(request.getPropertyAddress())
                 .status(LoanStatus.APPLIED)
@@ -94,6 +90,7 @@ public class LoanService {
         // Log the action: who created this loan, when, and what status it entered.
         AuditLog auditLog = AuditLog.builder()
                 .loanApplication(savedLoan)
+                .changedById(userId)
                 .fromStatus(null)
                 .toStatus(LoanStatus.APPLIED.toString())
                 .notes("Loan application submitted by " + userDto.getEmail())
@@ -523,7 +520,7 @@ public class LoanService {
     private boolean isAuthorizedToViewLoan(Long userId, String userRole, LoanApplication loan) {
         switch (userRole) {
             case "BORROWER":
-                return loan.getBorrower().getUser().getId().equals(userId);
+                return loan.getBorrower().getUserId().equals(userId);
             case "CREDIT_OFFICER":
                 return loan.getStatus() == LoanStatus.APPLIED;
             case "APPRAISER":
@@ -574,4 +571,3 @@ public class LoanService {
         }
     }
 }
-
