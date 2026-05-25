@@ -22,9 +22,8 @@ public class LoanDocument {
     @JoinColumn(name = "loan_application_id", nullable = false)
     private LoanApplication loanApplication;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "uploaded_by", nullable = false)
-    private User uploadedBy;
+    @Column(name = "uploaded_by_id", nullable = false)
+    private Long uploadedById;
 
     @Column(name = "document_type", nullable = false)
     private String documentType;

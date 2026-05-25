@@ -1,5 +1,6 @@
 package com.loanorigination.loanservice.service;
 
+import com.loanorigination.loanservice.client.UserClient;
 import com.loanorigination.loanservice.dto.CreateLoanRequest;
 import com.loanorigination.loanservice.dto.LoanApplicationDTO;
 import com.loanorigination.loanservice.dto.LoanDetailDTO;
@@ -7,6 +8,7 @@ import com.loanorigination.loanservice.dto.LoanDocumentRequest;
 import com.loanorigination.loanservice.dto.LoanSummaryDTO;
 import com.loanorigination.loanservice.dto.PropertyAssessmentRequest;
 import com.loanorigination.loanservice.dto.UnderwritingDecisionRequest;
+import com.loanorigination.loanservice.dto.UserDto;
 import com.loanorigination.loanservice.entity.AuditLog;
 import com.loanorigination.loanservice.entity.Borrower;
 import com.loanorigination.loanservice.entity.LoanApplication;
@@ -43,6 +45,7 @@ public class LoanService {
     private final UnderwritingDecisionRepository underwritingDecisionRepository;
     private final LoanDocumentRepository loanDocumentRepository;
     private final KafkaProducerService kafkaProducerService;
+    private final UserClient userClient;
 
     @Autowired
     public LoanService(LoanApplicationRepository loanApplicationRepository,
@@ -52,7 +55,8 @@ public class LoanService {
                        PropertyAssessmentRepository propertyAssessmentRepository,
                        UnderwritingDecisionRepository underwritingDecisionRepository,
                        LoanDocumentRepository loanDocumentRepository,
-                       KafkaProducerService kafkaProducerService) {
+                       KafkaProducerService kafkaProducerService,
+                       UserClient userClient) {
         this.loanApplicationRepository = loanApplicationRepository;
         this.borrowerRepository = borrowerRepository;
         this.auditLogRepository = auditLogRepository;
@@ -61,6 +65,7 @@ public class LoanService {
         this.underwritingDecisionRepository = underwritingDecisionRepository;
         this.loanDocumentRepository = loanDocumentRepository;
         this.kafkaProducerService = kafkaProducerService;
+        this.userClient = userClient;
     }
 
     // BORROWER submits a new loan application.
@@ -72,14 +77,12 @@ public class LoanService {
         Borrower borrower = borrowerRepository.findByUserId(userId)
                 .orElseThrow(() -> new IllegalArgumentException("Borrower profile not found for user"));
 
-        // Get the User entity to record who created this loan (for AuditLog).
-        User createdBy = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        // Fetch user from auth-service instead of local DB.
+        UserDto userDto = userClient.getUserById(userId);
 
         // Create the LoanApplication with APPLIED status.
         LoanApplication loanApplication = LoanApplication.builder()
                 .borrower(borrower)
-                .createdBy(createdBy)
                 .loanAmount(request.getLoanAmount())
                 .propertyAddress(request.getPropertyAddress())
                 .status(LoanStatus.APPLIED)
@@ -91,10 +94,9 @@ public class LoanService {
         // Log the action: who created this loan, when, and what status it entered.
         AuditLog auditLog = AuditLog.builder()
                 .loanApplication(savedLoan)
-                .changedBy(createdBy)
                 .fromStatus(null)
                 .toStatus(LoanStatus.APPLIED.toString())
-                .notes("Loan application submitted")
+                .notes("Loan application submitted by " + userDto.getEmail())
                 .build();
 
         auditLogRepository.save(auditLog);
@@ -242,13 +244,13 @@ public class LoanService {
             throw new IllegalArgumentException("Loan must be in UNDER_REVIEW status to submit assessment");
         }
 
-        User appraiser = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        // Fetch user from auth-service.
+        UserDto userDto = userClient.getUserById(userId);
 
         // Create PropertyAssessment.
         PropertyAssessment assessment = PropertyAssessment.builder()
                 .loanApplication(loan)
-                .appraiser(appraiser)
+                .appraiserId(userId)
                 .assessedValue(request.getAssessedValue())
                 .build();
 
@@ -261,7 +263,7 @@ public class LoanService {
         // Write AuditLog.
         AuditLog auditLog = AuditLog.builder()
                 .loanApplication(updatedLoan)
-                .changedBy(appraiser)
+                .changedById(userId)
                 .fromStatus(LoanStatus.UNDER_REVIEW.toString())
                 .toStatus(LoanStatus.ASSESSED.toString())
                 .notes("Property assessment submitted")
@@ -270,7 +272,7 @@ public class LoanService {
         auditLogRepository.save(auditLog);
 
         // Publish event to Kafka.
-        publishLoanStatusEvent(LoanStatus.UNDER_REVIEW, LoanStatus.ASSESSED, appraiser, updatedLoan.getId());
+        publishLoanStatusEvent(LoanStatus.UNDER_REVIEW, LoanStatus.ASSESSED, userDto, updatedLoan.getId());
 
         return new LoanApplicationDTO(
                 updatedLoan.getId(),
@@ -296,13 +298,13 @@ public class LoanService {
             throw new IllegalArgumentException("Loan must be in ASSESSED status to submit decision");
         }
 
-        User underwriter = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        // Fetch user from auth-service.
+        UserDto userDto = userClient.getUserById(userId);
 
         // Create UnderwritingDecision.
         UnderwritingDecision decision = UnderwritingDecision.builder()
                 .loanApplication(loan)
-                .underwriter(underwriter)
+                .underwriterId(userId)
                 .decision(request.getDecision())
                 .notes(request.getNotes())
                 .build();
@@ -317,7 +319,7 @@ public class LoanService {
         // Write AuditLog.
         AuditLog auditLog = AuditLog.builder()
                 .loanApplication(updatedLoan)
-                .changedBy(underwriter)
+                .changedById(userId)
                 .fromStatus(LoanStatus.ASSESSED.toString())
                 .toStatus(newStatus.toString())
                 .notes("Underwriting decision: " + request.getDecision())
@@ -326,7 +328,7 @@ public class LoanService {
         auditLogRepository.save(auditLog);
 
         // Publish event to Kafka.
-        publishLoanStatusEvent(LoanStatus.ASSESSED, newStatus, underwriter, updatedLoan.getId());
+        publishLoanStatusEvent(LoanStatus.ASSESSED, newStatus, userDto, updatedLoan.getId());
 
         return new LoanApplicationDTO(
                 updatedLoan.getId(),
@@ -352,13 +354,10 @@ public class LoanService {
             throw new IllegalArgumentException("Loan must be in LEGAL_REVIEW status to upload documents");
         }
 
-        User uploadedBy = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
-
         // Create LoanDocument (no status change).
         LoanDocument document = LoanDocument.builder()
                 .loanApplication(loan)
-                .uploadedBy(uploadedBy)
+                .uploadedById(userId)
                 .documentType(request.getDocumentType())
                 .filePath(request.getFilePath())
                 .build();
@@ -389,8 +388,8 @@ public class LoanService {
             throw new IllegalArgumentException("Loan must be in LEGAL_REVIEW status to disburse");
         }
 
-        User disbursementOfficer = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        // Fetch user from auth-service.
+        UserDto userDto = userClient.getUserById(userId);
 
         // Transition loan to DISBURSED.
         loan.setStatus(LoanStatus.DISBURSED);
@@ -399,7 +398,7 @@ public class LoanService {
         // Write AuditLog.
         AuditLog auditLog = AuditLog.builder()
                 .loanApplication(updatedLoan)
-                .changedBy(disbursementOfficer)
+                .changedById(userId)
                 .fromStatus(LoanStatus.LEGAL_REVIEW.toString())
                 .toStatus(LoanStatus.DISBURSED.toString())
                 .notes("Loan disbursed")
@@ -408,7 +407,7 @@ public class LoanService {
         auditLogRepository.save(auditLog);
 
         // Publish event to Kafka.
-        publishLoanStatusEvent(LoanStatus.LEGAL_REVIEW, LoanStatus.DISBURSED, disbursementOfficer, updatedLoan.getId());
+        publishLoanStatusEvent(LoanStatus.LEGAL_REVIEW, LoanStatus.DISBURSED, userDto, updatedLoan.getId());
 
         return new LoanApplicationDTO(
                 updatedLoan.getId(),
@@ -436,14 +435,13 @@ public class LoanService {
         loan.setStatus(toStatus);
         LoanApplication updatedLoan = loanApplicationRepository.save(loan);
 
-        // Get the User entity for AuditLog.
-        User changedBy = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        // Fetch user from auth-service.
+        UserDto userDto = userClient.getUserById(userId);
 
         // Write AuditLog entry.
         AuditLog auditLog = AuditLog.builder()
                 .loanApplication(updatedLoan)
-                .changedBy(changedBy)
+                .changedById(userId)
                 .fromStatus(fromStatus.toString())
                 .toStatus(toStatus.toString())
                 .notes("Status changed from " + fromStatus + " to " + toStatus)
@@ -452,7 +450,7 @@ public class LoanService {
         auditLogRepository.save(auditLog);
 
         // Publish event to Kafka.
-        publishLoanStatusEvent(fromStatus, toStatus, changedBy, updatedLoan.getId());
+        publishLoanStatusEvent(fromStatus, toStatus, userDto, updatedLoan.getId());
 
         return new LoanApplicationDTO(
                 updatedLoan.getId(),
@@ -544,7 +542,7 @@ public class LoanService {
     }
 
     // Helper: Publish a LoanStatusEvent to Kafka after status transition.
-    private void publishLoanStatusEvent(LoanStatus fromStatus, LoanStatus toStatus, User changedByUser, Long loanId) {
+    private void publishLoanStatusEvent(LoanStatus fromStatus, LoanStatus toStatus, UserDto changedByUser, Long loanId) {
         LoanStatusEvent event = new LoanStatusEvent();
         event.setLoanId(loanId);
         event.setFromStatus(fromStatus.toString());
