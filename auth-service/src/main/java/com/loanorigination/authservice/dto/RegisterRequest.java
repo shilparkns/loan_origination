@@ -1,5 +1,6 @@
-package com.loanorigination.loanservice.dto;
+package com.loanorigination.authservice.dto;
 
+import com.loanorigination.authservice.enums.UserRole;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
@@ -7,12 +8,17 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-// Request payload for POST /auth/login.
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class LoginRequest {
+public class RegisterRequest {
+
+    @NotBlank(message = "First name is required")
+    private String firstName;
+
+    @NotBlank(message = "Last name is required")
+    private String lastName;
 
     @Email(message = "Email should be valid")
     @NotBlank(message = "Email is required")
@@ -20,4 +26,6 @@ public class LoginRequest {
 
     @NotBlank(message = "Password is required")
     private String password;
+
+    private UserRole role;
 }

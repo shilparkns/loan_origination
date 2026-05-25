@@ -18,6 +18,7 @@
 
     <modules>
         <module>loan-service</module>
+        <module>auth-service</module>
         <module>notification-service</module>
         <module>api-gateway-service</module>
     </modules>

@@ -26,6 +26,18 @@ services:
     volumes:
       - notification-db-data:/var/lib/postgresql/data
 
+  auth-db:
+    image: postgres:15
+    container_name: auth-db
+    environment:
+      POSTGRES_DB: authdb
+      POSTGRES_USER: authuser
+      POSTGRES_PASSWORD: authpass
+    ports:
+      - "5434:5432"
+    volumes:
+      - auth-db-data:/var/lib/postgresql/data
+
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: zookeeper
@@ -50,3 +62,4 @@ services:
 volumes:
   loan-db-data:
   notification-db-data:
+  auth-db-data:

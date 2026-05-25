@@ -430,6 +430,21 @@ EPIC 6 — notification-service: Kafka Consumers
 
 ---
 
+FUTURE: Event-Driven User Sync (TBD)
+
+▎ Goal: Replace API calls with event-driven user synchronization for better scalability.
+
+**Current approach (Auth-Service redesign):** loan-service calls auth-service API to fetch user info. Simple but couples services.
+
+**Future approach:** auth-service publishes UserCreated/UserUpdated events to Kafka. loan-service subscribes and maintains its own user cache. Enables offline operation if auth-service is down.
+
+**Tickets (not yet scheduled):**
+- FutureT1: Add UserCreated event publishing in auth-service
+- FutureT2: UserSyncConsumer in loan-service to cache users
+- FutureT3: Replace API calls with local cache lookups
+
+---
+
 EPIC 7 — api-gateway-service: Routing & JWT Validation
 
 ▎ Goal: Gateway validates JWT, attaches trusted headers, and routes requests to loan-service.

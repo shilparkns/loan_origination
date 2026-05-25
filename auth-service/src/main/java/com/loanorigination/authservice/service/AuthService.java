@@ -1,11 +1,12 @@
-package com.loanorigination.loanservice.service;
+package com.loanorigination.authservice.service;
 
-import com.loanorigination.loanservice.dto.LoginRequest;
-import com.loanorigination.loanservice.dto.LoginResponse;
-import com.loanorigination.loanservice.dto.RegisterRequest;
-import com.loanorigination.loanservice.entity.User;
-import com.loanorigination.loanservice.repository.UserRepository;
-import com.loanorigination.loanservice.security.JwtUtil;
+import com.loanorigination.authservice.dto.LoginRequest;
+import com.loanorigination.authservice.dto.LoginResponse;
+import com.loanorigination.authservice.dto.RegisterRequest;
+import com.loanorigination.authservice.dto.UserDto;
+import com.loanorigination.authservice.entity.User;
+import com.loanorigination.authservice.repository.UserRepository;
+import com.loanorigination.authservice.security.JwtUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -28,7 +29,8 @@ public class AuthService {
 
     // Creates a new user account.
     // Validates that email is not already taken, hashes the password, saves to DB.
-    // Returns a LoginResponse with a fresh JWT token so the user can immediately use their account.
+    // Returns a LoginResponse with a fresh JWT token so the user can immediately
+    // use their account.
     public LoginResponse register(RegisterRequest request) {
         // Check if email already exists.
         if (userRepository.existsByEmail(request.getEmail())) {
@@ -56,7 +58,8 @@ public class AuthService {
         return new LoginResponse(token);
     }
 
-    // Authenticates a user: validates email exists, password matches, and issues a JWT.
+    // Authenticates a user: validates email exists, password matches, and issues a
+    // JWT.
     // If email doesn't exist or password is wrong, throws an exception.
     public LoginResponse login(LoginRequest request) {
         // Look up the user by email.
@@ -64,7 +67,8 @@ public class AuthService {
                 .orElseThrow(() -> new IllegalArgumentException("Invalid email or password"));
 
         // Compare the provided password (plaintext) against the stored hash.
-        // passwordEncoder.matches() hashes the input and compares it to the stored hash.
+        // passwordEncoder.matches() hashes the input and compares it to the stored
+        // hash.
         // This is one-way: we never store or transmit the plaintext password.
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new IllegalArgumentException("Invalid email or password");
@@ -74,5 +78,19 @@ public class AuthService {
         String token = jwtUtil.generateToken(user.getId(), user.getRole().toString());
 
         return new LoginResponse(token);
+    }
+
+    // Fetches user details by ID for service-to-service calls.
+    // Converts User entity to UserDto to avoid exposing password field.
+    public UserDto getUserById(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        return new UserDto(
+                user.getId(),
+                user.getFirstName(),
+                user.getLastName(),
+                user.getEmail(),
+                user.getRole());
     }
 }
