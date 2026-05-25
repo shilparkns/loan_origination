@@ -464,6 +464,42 @@ EPIC 8 — Infrastructure & CI/CD
 
 ---
 
-Total: 8 Epics, 33 Tickets
+EPIC 6.5 — Auth-Service Redesign & Microservices Integration (In Progress)
+
+▎ Goal: Extract authentication to separate auth-service microservice. Implement Option 3 (API calls) for user lookups.
+
+**Completed (Current Chat):**
+- T1: RestTemplate bean in loan-service ✓
+- T2: UserClient (calls auth-service API) ✓
+- T3: UserDto (receives auth-service response) ✓
+- T4: Microservices refactor — removed User FK dependencies ✓
+  - PropertyAssessment: appraiser_id (Long) — was User FK
+  - UnderwritingDecision: underwriter_id (Long) — was User FK
+  - LoanDocument: uploaded_by_id (Long) — was User FK
+  - AuditLog: changed_by_id (Long) — was User FK
+  - LoanApplication: created_by_id (Long) — was User FK
+  - Migration V8: Drops FK constraints, aligns with microservices
+
+**Current Architecture:**
+- auth-service: owns User table, JWT generation, port 8083
+- loan-service: calls auth-service API via UserClient when user data needed
+- No FK constraints across services (true microservices decoupling)
+- User data fetched once per request, passed to Kafka event publishing
+
+**Next in New Chat:**
+1. **T5: Verify userId flow** — ensure auth-service returns userId in JWT/response
+2. **EP7: API Gateway Service** — build api-gateway-service for routing and JWT validation
+   - Route all traffic through gateway (port 8080)
+   - Validate JWT tokens at gateway
+   - Add X-User-Id and X-User-Role headers to downstream requests
+
+**Future Work (Option 2 - Event-Driven Sync):**
+- auth-service publishes UserCreated/UserUpdated events
+- loan-service subscribes, maintains local user cache
+- Replaces API calls with local lookups for better performance
+
+---
+
+Total: 8 Epics + Auth Redesign, 33 Tickets + redesign work
 
 Dependency order is already respected — each epic builds on the one before it. When you're ready to start, say the word and we'll begin with EP1-T1.

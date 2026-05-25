@@ -22,9 +22,8 @@ public class UnderwritingDecision {
     @JoinColumn(name = "loan_application_id", nullable = false)
     private LoanApplication loanApplication;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "underwriter_id", nullable = false)
-    private User underwriter;
+    @Column(name = "underwriter_id", nullable = false)
+    private Long underwriterId;
 
     @Column(nullable = false)
     private String decision;

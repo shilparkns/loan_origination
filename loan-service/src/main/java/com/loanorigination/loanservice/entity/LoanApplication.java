@@ -24,9 +24,8 @@ public class LoanApplication {
     @JoinColumn(name = "borrower_id", nullable = false)
     private Borrower borrower;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "created_by", nullable = false)
-    private User createdBy;
+    @Column(name = "created_by_id", nullable = false)
+    private Long createdById;
 
     @Column(name = "loan_amount", nullable = false)
     private BigDecimal loanAmount;

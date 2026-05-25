@@ -23,9 +23,8 @@ public class PropertyAssessment {
     @JoinColumn(name = "loan_application_id", nullable = false)
     private LoanApplication loanApplication;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "appraiser_id", nullable = false)
-    private User appraiser;
+    @Column(name = "appraiser_id", nullable = false)
+    private Long appraiserId;
 
     @Column(name = "assessed_value", nullable = false)
     private BigDecimal assessedValue;

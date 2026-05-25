@@ -22,9 +22,8 @@ public class AuditLog {
     @JoinColumn(name = "loan_application_id", nullable = false)
     private LoanApplication loanApplication;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "changed_by", nullable = false)
-    private User changedBy;
+    @Column(name = "changed_by_id")
+    private Long changedById;
 
     @Column(name = "from_status")
     private String fromStatus;
