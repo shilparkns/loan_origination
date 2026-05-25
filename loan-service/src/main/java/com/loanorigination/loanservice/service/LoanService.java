@@ -1,5 +1,6 @@
 package com.loanorigination.loanservice.service;
 
+import com.loanorigination.loanservice.client.UserClient;
 import com.loanorigination.loanservice.dto.CreateLoanRequest;
 import com.loanorigination.loanservice.dto.LoanApplicationDTO;
 import com.loanorigination.loanservice.dto.LoanDetailDTO;
@@ -43,6 +44,7 @@ public class LoanService {
     private final UnderwritingDecisionRepository underwritingDecisionRepository;
     private final LoanDocumentRepository loanDocumentRepository;
     private final KafkaProducerService kafkaProducerService;
+    private final UserClient userClient;
 
     @Autowired
     public LoanService(LoanApplicationRepository loanApplicationRepository,
@@ -52,7 +54,8 @@ public class LoanService {
                        PropertyAssessmentRepository propertyAssessmentRepository,
                        UnderwritingDecisionRepository underwritingDecisionRepository,
                        LoanDocumentRepository loanDocumentRepository,
-                       KafkaProducerService kafkaProducerService) {
+                       KafkaProducerService kafkaProducerService,
+                       UserClient userClient) {
         this.loanApplicationRepository = loanApplicationRepository;
         this.borrowerRepository = borrowerRepository;
         this.auditLogRepository = auditLogRepository;
@@ -61,6 +64,7 @@ public class LoanService {
         this.underwritingDecisionRepository = underwritingDecisionRepository;
         this.loanDocumentRepository = loanDocumentRepository;
         this.kafkaProducerService = kafkaProducerService;
+        this.userClient = userClient;
     }
 
     // BORROWER submits a new loan application.
