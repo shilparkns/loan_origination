@@ -3,6 +3,7 @@ package com.loanorigination.loanservice.security;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
@@ -14,6 +15,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Map;
 
 // Intercepts every HTTP request and validates the JWT in the Authorization header.
 // If valid, extracts userId and role, then sets them as X-User-Id and X-User-Role headers
@@ -38,6 +42,8 @@ public class JwtFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
+        HttpServletRequest requestToUse = request;
+
         try {
             // Extract token from the Authorization header (expected format: "Bearer
             // <token>").
@@ -53,6 +59,9 @@ public class JwtFilter extends OncePerRequestFilter {
                 // the JWT.
                 request.setAttribute("X-User-Id", userId);
                 request.setAttribute("X-User-Role", role);
+                requestToUse = new HeaderMapRequestWrapper(request, Map.of(
+                        "X-User-Id", userId.toString(),
+                        "X-User-Role", role));
 
                 // Set SecurityContextHolder so Spring Security recognizes the user as
                 // authenticated.
@@ -67,7 +76,7 @@ public class JwtFilter extends OncePerRequestFilter {
         }
 
         // Pass the request and response to the next filter in the chain.
-        filterChain.doFilter(request, response);
+        filterChain.doFilter(requestToUse, response);
     }
 
     // Extracts the JWT from the Authorization header.
@@ -79,5 +88,42 @@ public class JwtFilter extends OncePerRequestFilter {
             return authHeader.substring("Bearer ".length());
         }
         return null;
+    }
+
+    private static class HeaderMapRequestWrapper extends HttpServletRequestWrapper {
+
+        private final Map<String, String> customHeaders;
+
+        HeaderMapRequestWrapper(HttpServletRequest request, Map<String, String> customHeaders) {
+            super(request);
+            this.customHeaders = new HashMap<>(customHeaders);
+        }
+
+        @Override
+        public String getHeader(String name) {
+            String customHeader = customHeaders.get(name);
+            return customHeader != null ? customHeader : super.getHeader(name);
+        }
+
+        @Override
+        public Enumeration<String> getHeaders(String name) {
+            String customHeader = customHeaders.get(name);
+            if (customHeader != null) {
+                return Collections.enumeration(Collections.singleton(customHeader));
+            }
+            return super.getHeaders(name);
+        }
+
+        @Override
+        public Enumeration<String> getHeaderNames() {
+            Map<String, String> headers = new HashMap<>();
+            Enumeration<String> existingHeaderNames = super.getHeaderNames();
+            while (existingHeaderNames.hasMoreElements()) {
+                String headerName = existingHeaderNames.nextElement();
+                headers.put(headerName, super.getHeader(headerName));
+            }
+            headers.putAll(customHeaders);
+            return Collections.enumeration(headers.keySet());
+        }
     }
 }
