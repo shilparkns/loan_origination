@@ -152,11 +152,12 @@ AuditLog.changedBy → User (any role)
 #### Endpoints:
 
 ```
-# Auth
-POST   /api/auth/register           → Register new user
-POST   /api/auth/login              → Login, returns JWT
+# Auth (infrastructure, top-level routing)
+POST   /auth/register               → Register new user
+POST   /auth/login                  → Login, returns JWT
+GET    /auth/users/{userId}         → Fetch user by ID (service-to-service)
 
-# Loans
+# Loans (domain resources)
 POST   /api/loans                   → Submit new application (BORROWER)
 GET    /api/loans                   → List loans (filtered by role + status)
 GET    /api/loans/{id}              → Get loan details (role-filtered)
