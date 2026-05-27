@@ -77,3 +77,17 @@ Then run smoke tests through:
 - or test-client proxy endpoints (`http://localhost:8084/test/...`)
 
 Postman collection: `docs/EP7-Gateway-Smoke-Test.postman_collection.json`.
+
+Quick curl smoke tests:
+
+```bash
+./test-client-smoke.sh      # quick via test-client
+./test-gateway.sh           # quick direct on gateway :8080
+```
+
+Full lifecycle (EP7-T4: all roles + transitions + DB/Kafka checks):
+
+```bash
+./test-client-lifecycle.sh  # via test-client -> gateway
+./test-gateway-lifecycle.sh # direct on gateway :8080
+```

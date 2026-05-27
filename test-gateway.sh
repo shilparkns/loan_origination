@@ -1,6 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Quick smoke test via api-gateway (register, login, create/list/get loan).
+# For full lifecycle (EP7-T4), use: ./test-gateway-lifecycle.sh
 
-GATEWAY_URL="http://localhost:8080"
+set -euo pipefail
+
+GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "jq is required. Install with: brew install jq"
+  exit 1
+fi
 
 echo "=== 1. Register Borrower ==="
 REGISTER_RESPONSE=$(curl -s -X POST "$GATEWAY_URL/auth/register" \
