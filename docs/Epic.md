@@ -69,11 +69,11 @@ EPIC 3 — loan-service: Auth & Security
     principals/authorities.
   - Acceptance criteria: Requests with valid token reach the controller. Requests with missing/expired/tampered token get 401 before hitting any controller.
 - EP3-T3 — SecurityConfig
-  - What to build: Spring Security 6 config. Public routes: POST /api/auth/\*_. All other routes require authentication. Role-based rules per the spec (e.g., only BORROWER can POST /api/loans, only DISBURSEMENT can
+  - What to build: Spring Security 6 config. Public routes: POST /auth/*. All other routes require authentication. Role-based rules per the spec (e.g., only BORROWER can POST /api/loans, only DISBURSEMENT can
     PATCH /api/loans/_/disburse). Stateless session. Register JwtFilter before UsernamePasswordAuthenticationFilter.
   - Acceptance criteria: Hitting a protected endpoint with no token returns 401. Hitting with a valid token but wrong role returns 403.
 - EP3-T4 — AuthController + AuthService
-  - What to build: POST /api/auth/register — creates User + Borrower profile (if role is BORROWER), hashes password with BCrypt. POST /api/auth/login — validates credentials, returns JWT in response body. AuthService
+  - What to build: POST /auth/register — creates User (and borrower identity via user role), hashes password with BCrypt. POST /auth/login — validates credentials, returns JWT in response body. AuthService
     encapsulates the logic.
   - Acceptance criteria: Can register a BORROWER and a CREDIT_OFFICER. Can log in with either and receive a valid JWT. Wrong password returns 401.
 - EP3-T5 — Auth DTOs + global error structure
@@ -88,13 +88,13 @@ EPIC 4 — loan-service: Loan REST API
 ▎ Goal: All loan lifecycle endpoints working with role enforcement and audit logging on every status change.
 
 - EP4-T1 — POST /api/loans (submit application)
-  - What to build: BORROWER submits a new loan. Reads X-User-Id header (from gateway) to find the Borrower profile. Validates loanAmount > 0. Creates LoanApplication in APPLIED state. Writes AuditLog entry.
+  - What to build: BORROWER submits a new loan. Reads X-User-Id header (from gateway) to identify the borrower user. Validates loanAmount > 0. Creates LoanApplication in APPLIED state. Writes AuditLog entry.
   - Acceptance criteria: BORROWER can create a loan. Non-BORROWER gets 403. loanAmount ≤ 0 returns 400 with spec error format.
   - How to verify:
     ```
     # BORROWER creates loan (success)
-    POST http://localhost:8080/api/auth/register { "email": "borrower@test.com", "password": "pass", "role": "BORROWER", ... }
-    POST http://localhost:8080/api/auth/login { "email": "borrower@test.com", "password": "pass" } → get JWT
+    POST http://localhost:8080/auth/register { "email": "borrower@test.com", "password": "pass", "role": "BORROWER", ... }
+    POST http://localhost:8080/auth/login { "email": "borrower@test.com", "password": "pass" } → get JWT
     POST http://localhost:8080/api/loans { "loanAmount": 250000, "propertyAddress": "123 Main St" } -H "Authorization: Bearer <JWT>"
     # Expected: 201 with { "id": 1, "status": "APPLIED", ... }
     

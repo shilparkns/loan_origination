@@ -27,11 +27,8 @@ A platform for end-to-end loan origination process. Multiple teams interact with
 ## LOAN LIFECYCLE STATES
 
 ```
-APPLIED → UNDER_REVIEW → ASSESSED → APPROVED → REJECTED
-                                        ↓
-                                   LEGAL_REVIEW
-                                        ↓
-                                   DISBURSED
+APPLIED → UNDER_REVIEW → ASSESSED → APPROVED → LEGAL_REVIEW → DISBURSED
+                              └──────────────→ REJECTED (terminal)
 ```
 
 ---
@@ -46,7 +43,7 @@ APPLIED → UNDER_REVIEW → ASSESSED → APPROVED → REJECTED
 
 #### Entities:
 
-**User**
+**User (owned by auth-service)**
 
 ```
 - id
@@ -58,23 +55,12 @@ APPLIED → UNDER_REVIEW → ASSESSED → APPROVED → REJECTED
 - isActive (admin can deactivate users)
 ```
 
-**Borrower**
-
-```
-- id
-- user (FK → User, role: BORROWER)
-- firstName, lastName
-- email, phone
-- creditScore (300–850)
-- annualIncome
-```
-
 **LoanApplication**
 
 ```
 - id
-- borrower (FK → Borrower)
-- createdBy (FK → User)
+- borrowerId (Long, points to BORROWER user in auth-service)
+- createdById (Long, creator userId from auth-service)
 - loanAmount (must be > 0)
 - propertyAddress
 - status (APPLIED, UNDER_REVIEW, ASSESSED, APPROVED, REJECTED, LEGAL_REVIEW, DISBURSED)
@@ -86,7 +72,7 @@ APPLIED → UNDER_REVIEW → ASSESSED → APPROVED → REJECTED
 ```
 - id
 - loanApplication (FK → LoanApplication)
-- appraiserId (FK → User, role: APPRAISER)
+- appraiserId (Long, APPRAISER userId from auth-service)
 - assessedValue
 - assessedAt
 ```
@@ -96,7 +82,7 @@ APPLIED → UNDER_REVIEW → ASSESSED → APPROVED → REJECTED
 ```
 - id
 - loanApplication (FK → LoanApplication)
-- underwriterId (FK → User, role: UNDERWRITER)
+- underwriterId (Long, UNDERWRITER userId from auth-service)
 - decision (APPROVED / REJECTED)
 - notes
 - decidedAt
@@ -107,7 +93,7 @@ APPLIED → UNDER_REVIEW → ASSESSED → APPROVED → REJECTED
 ```
 - id
 - loanApplication (FK → LoanApplication)
-- uploadedBy (FK → User, role: LEGAL)
+- uploadedById (Long, LEGAL userId from auth-service)
 - documentType
 - filePath (string, no actual file storage)
 - uploadedAt
@@ -118,7 +104,7 @@ APPLIED → UNDER_REVIEW → ASSESSED → APPROVED → REJECTED
 ```
 - id
 - loanApplication (FK → LoanApplication)
-- changedBy (FK → User)
+- changedById (Long, userId from auth-service)
 - fromStatus
 - toStatus
 - notes
@@ -128,18 +114,17 @@ APPLIED → UNDER_REVIEW → ASSESSED → APPROVED → REJECTED
 #### Entity Relationships:
 
 ```
-User (role: BORROWER) ——→ Borrower profile
-LoanApplication.createdBy → User
-PropertyAssessment.appraiserId → User (role: APPRAISER)
-UnderwritingDecision.underwriterId → User (role: UNDERWRITER)
-LoanDocument.uploadedBy → User (role: LEGAL)
-AuditLog.changedBy → User (any role)
+LoanApplication.borrowerId → auth-service User (role: BORROWER)
+LoanApplication.createdById → auth-service User
+PropertyAssessment.appraiserId → auth-service User (role: APPRAISER)
+UnderwritingDecision.underwriterId → auth-service User (role: UNDERWRITER)
+LoanDocument.uploadedById → auth-service User (role: LEGAL)
+AuditLog.changedById → auth-service User (any role)
 ```
 
 #### Edge Cases:
 
 - loanAmount cannot be negative or zero
-- creditScore must be between 300–850
 - Every status change must write to AuditLog with the userId from the JWT token
 - password must be stored hashed (BCrypt), never plain text
 
@@ -206,23 +191,23 @@ PATCH  /api/loans/{id}/disburse     → Mark as disbursed (DISBURSEMENT)
 #### Flow:
 
 ```
-User hits POST /api/auth/login with email + password
+User hits POST /auth/login with email + password
         ↓
 System validates credentials, generates JWT with role embedded
         ↓
 User sends JWT in every subsequent request header:
 Authorization: Bearer <token>
         ↓
-JwtFilter intercepts request, validates token, extracts role
+Gateway filter validates token, extracts userId + role, and forwards trusted headers
         ↓
-Spring Security allows or blocks based on role
+loan-service applies role + state business rules
 ```
 
 #### Key Classes:
 
 - `JwtUtil` — generates and validates tokens, extracts role/userId
-- `JwtFilter` — intercepts every request before it hits the controller
-- `SecurityConfig` — defines which endpoints require which roles
+- `JwtAuthenticationGatewayFilter` — validates JWT at gateway and injects `X-User-Id`/`X-User-Role`
+- `SecurityConfig` — defines protected/public routes and role constraints
 
 #### Edge Cases:
 
@@ -284,9 +269,9 @@ LEGAL_REVIEW → DISBURSED      notify → DISBURSEMENT
 
 #### docker-compose.yml spins up:
 
-- Spring Boot app
-- PostgreSQL 15
+- PostgreSQL (separate DB per service)
 - Kafka 3.x + Zookeeper
+- Spring Boot services run locally via Maven
 
 #### GitHub Actions Pipeline:
 
@@ -338,15 +323,6 @@ Deploy to EC2
 ## KEY INTERVIEW TALKING POINTS
 
 - **Audit trail:** Every status change writes to AuditLog with the userId pulled from the JWT token — connects JWT, AuditLog, and User entity in one flow
-- **N+1 fix:** Used JOIN FETCH in JPQL queries to avoid N+1 loads on loan + borrower lookups
+- **Microservice decoupling:** loan-service stores user IDs and fetches user data from auth-service (no cross-service FK constraints)
 - **Kafka design:** Chose event-driven over direct service calls so downstream teams are fully decoupled — a consumer failure doesn't block the origination flow
 - **Role-based access:** Roles embedded in JWT, enforced at the Spring Security layer before requests hit controllers
-
-loan-platform/ ← parent
-pom.xml
-loan-domain/ ← module 1, its own pom.xml
-src/
-loan-api/ ← module 2, its own pom.xml
-src/
-loan-kafka/ ← module 3, its own pom.xml
-src/

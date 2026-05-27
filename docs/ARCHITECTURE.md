@@ -77,24 +77,19 @@ loan-service (Controller):
 
 ---
 
-## 4. Eager Loading with JOIN FETCH to Avoid N+1
+## 4. Service Decoupling: No Cross-Service Foreign Keys
 
-**Decision:** Use JPA `@Query` with `JOIN FETCH` in repository methods to eagerly load relationships.
-
-**Example:**
-```java
-@Query("SELECT l FROM LoanApplication l JOIN FETCH l.borrower WHERE l.id = :id")
-Optional<LoanApplication> findByIdWithBorrower(@Param("id") Long id);
-```
+**Decision:** Keep user ownership in `auth-service` and store user identifiers (`borrowerId`, `createdById`, etc.) in `loan-service` instead of cross-service foreign keys.
 
 **Why:**
-- **Performance:** One SQL query instead of N+1 (1 loan query + N borrower queries)
-- **Explicit:** Obvious in code what relationships are loaded
-- **Lazy Loading Risk:** Default JPA lazy loading causes hidden queries, hard to debug
+- **Microservice boundaries:** Each service owns its own schema and can evolve independently
+- **Independent deployability:** `loan-service` can run without direct DB coupling to `auth-service`
+- **Clear ownership:** User lifecycle/auth concerns stay in `auth-service`
+- **Operational safety:** No distributed schema coupling across service databases
 
-**When NOT to use:**
-- Loading many loans (JOIN FETCH multiplies result set if you're not careful)
-- When you don't need the relationship
+**Trade-off:**
+- Some flows require user lookups through service-to-service calls
+- Referential integrity across services is enforced at application layer, not DB FK constraints
 
 ---
 
@@ -109,11 +104,8 @@ Optional<LoanApplication> findByIdWithBorrower(@Param("id") Long id);
 
 **The State Machine (from SPEC.md):**
 ```
-APPLIED → UNDER_REVIEW → ASSESSED → APPROVED → REJECTED
-                                        ↓
-                                   LEGAL_REVIEW
-                                        ↓
-                                   DISBURSED
+APPLIED → UNDER_REVIEW → ASSESSED → APPROVED → LEGAL_REVIEW → DISBURSED
+                              └──────────────→ REJECTED (terminal)
 ```
 
 **Transition Rules Table:**
