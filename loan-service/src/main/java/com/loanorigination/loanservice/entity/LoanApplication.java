@@ -20,9 +20,8 @@ public class LoanApplication {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "borrower_id", nullable = false)
-    private Borrower borrower;
+    @Column(name = "borrower_id", nullable = false)
+    private Long borrowerId;
 
     @Column(name = "created_by_id", nullable = false)
     private Long createdById;

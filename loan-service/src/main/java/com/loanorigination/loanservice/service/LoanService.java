@@ -10,7 +10,6 @@ import com.loanorigination.loanservice.dto.PropertyAssessmentRequest;
 import com.loanorigination.loanservice.dto.UnderwritingDecisionRequest;
 import com.loanorigination.loanservice.dto.UserDto;
 import com.loanorigination.loanservice.entity.AuditLog;
-import com.loanorigination.loanservice.entity.Borrower;
 import com.loanorigination.loanservice.entity.LoanApplication;
 import com.loanorigination.loanservice.entity.LoanDocument;
 import com.loanorigination.loanservice.entity.PropertyAssessment;
@@ -18,7 +17,6 @@ import com.loanorigination.loanservice.entity.UnderwritingDecision;
 import com.loanorigination.loanservice.enums.LoanStatus;
 import com.loanorigination.loanservice.event.LoanStatusEvent;
 import com.loanorigination.loanservice.repository.AuditLogRepository;
-import com.loanorigination.loanservice.repository.BorrowerRepository;
 import com.loanorigination.loanservice.repository.LoanApplicationRepository;
 import com.loanorigination.loanservice.repository.LoanDocumentRepository;
 import com.loanorigination.loanservice.repository.PropertyAssessmentRepository;
@@ -36,7 +34,6 @@ import java.util.stream.Collectors;
 public class LoanService {
 
     private final LoanApplicationRepository loanApplicationRepository;
-    private final BorrowerRepository borrowerRepository;
     private final AuditLogRepository auditLogRepository;
     private final PropertyAssessmentRepository propertyAssessmentRepository;
     private final UnderwritingDecisionRepository underwritingDecisionRepository;
@@ -46,7 +43,6 @@ public class LoanService {
 
     @Autowired
     public LoanService(LoanApplicationRepository loanApplicationRepository,
-                       BorrowerRepository borrowerRepository,
                        AuditLogRepository auditLogRepository,
                        PropertyAssessmentRepository propertyAssessmentRepository,
                        UnderwritingDecisionRepository underwritingDecisionRepository,
@@ -54,7 +50,6 @@ public class LoanService {
                        KafkaProducerService kafkaProducerService,
                        UserClient userClient) {
         this.loanApplicationRepository = loanApplicationRepository;
-        this.borrowerRepository = borrowerRepository;
         this.auditLogRepository = auditLogRepository;
         this.propertyAssessmentRepository = propertyAssessmentRepository;
         this.underwritingDecisionRepository = underwritingDecisionRepository;
@@ -64,20 +59,14 @@ public class LoanService {
     }
 
     // BORROWER submits a new loan application.
-    // Reads the Borrower profile via userId, creates a LoanApplication in APPLIED state,
-    // and logs the action to AuditLog.
+    // Verifies the user is registered in auth-service, then creates a LoanApplication in APPLIED state.
     public LoanApplicationDTO createLoan(Long userId, CreateLoanRequest request) {
-        // Find the Borrower associated with this user.
-        // If not found, throw an exception (Borrower must exist — created at registration for BORROWER role).
-        Borrower borrower = borrowerRepository.findByUserId(userId)
-                .orElseThrow(() -> new IllegalArgumentException("Borrower profile not found for user"));
-
-        // Fetch user from auth-service instead of local DB.
+        // Verify user exists in auth-service (registered user).
         UserDto userDto = userClient.getUserById(userId);
 
         // Create the LoanApplication with APPLIED status.
         LoanApplication loanApplication = LoanApplication.builder()
-                .borrower(borrower)
+                .borrowerId(userId)
                 .createdById(userId)
                 .loanAmount(request.getLoanAmount())
                 .propertyAddress(request.getPropertyAddress())
@@ -109,59 +98,58 @@ public class LoanService {
     }
 
     // Fetches loans visible to the caller based on their role.
-    // Different roles see different loans per the spec state machine:
-    //   BORROWER      → only their own loans
-    //   CREDIT_OFFICER → APPLIED status
-    //   APPRAISER     → UNDER_REVIEW status
-    //   UNDERWRITER   → ASSESSED status
-    //   LEGAL         → APPROVED status
-    //   DISBURSEMENT  → LEGAL_REVIEW status
-    //   ADMIN         → all loans
+    // Different roles see different loans per the spec state machine.
+    // Fetches borrower names from auth-service.
     public List<LoanSummaryDTO> getLoansByRole(Long userId, String userRole) {
         List<LoanApplication> loans;
 
         switch (userRole) {
             case "BORROWER":
-                // BORROWER sees only their own loans.
-                loans = loanApplicationRepository.findByBorrowerIdWithBorrower(userId);
+                loans = loanApplicationRepository.findByBorrowerId(userId);
                 break;
             case "CREDIT_OFFICER":
-                // CREDIT_OFFICER sees loans in APPLIED status.
-                loans = loanApplicationRepository.findByStatusWithBorrower(LoanStatus.APPLIED);
+                loans = loanApplicationRepository.findByStatus(LoanStatus.APPLIED);
                 break;
             case "APPRAISER":
-                // APPRAISER sees loans in UNDER_REVIEW status.
-                loans = loanApplicationRepository.findByStatusWithBorrower(LoanStatus.UNDER_REVIEW);
+                loans = loanApplicationRepository.findByStatus(LoanStatus.UNDER_REVIEW);
                 break;
             case "UNDERWRITER":
-                // UNDERWRITER sees loans in ASSESSED status.
-                loans = loanApplicationRepository.findByStatusWithBorrower(LoanStatus.ASSESSED);
+                loans = loanApplicationRepository.findByStatus(LoanStatus.ASSESSED);
                 break;
             case "LEGAL":
-                // LEGAL sees loans in APPROVED status.
-                loans = loanApplicationRepository.findByStatusWithBorrower(LoanStatus.APPROVED);
+                loans = loanApplicationRepository.findByStatus(LoanStatus.APPROVED);
                 break;
             case "DISBURSEMENT":
-                // DISBURSEMENT sees loans in LEGAL_REVIEW status.
-                loans = loanApplicationRepository.findByStatusWithBorrower(LoanStatus.LEGAL_REVIEW);
+                loans = loanApplicationRepository.findByStatus(LoanStatus.LEGAL_REVIEW);
                 break;
             case "ADMIN":
-                // ADMIN sees all loans.
-                loans = loanApplicationRepository.findAllWithBorrower();
+                loans = loanApplicationRepository.findAll();
                 break;
             default:
-                // Unknown role — return empty list.
                 return List.of();
         }
 
-        // Convert to LoanSummaryDTO and return.
+        // Convert to DTOs, fetching borrower names from auth-service.
         return loans.stream()
-                .map(loan -> new LoanSummaryDTO(
-                        loan.getId(),
-                        loan.getLoanAmount(),
-                        loan.getBorrower().getFirstName() + " " + loan.getBorrower().getLastName(),
-                        loan.getStatus()
-                ))
+                .map(loan -> {
+                    try {
+                        UserDto borrower = userClient.getUserById(loan.getBorrowerId());
+                        return new LoanSummaryDTO(
+                                loan.getId(),
+                                loan.getLoanAmount(),
+                                borrower.getFirstName() + " " + borrower.getLastName(),
+                                loan.getStatus()
+                        );
+                    } catch (Exception e) {
+                        // If user not found, use loan ID as fallback.
+                        return new LoanSummaryDTO(
+                                loan.getId(),
+                                loan.getLoanAmount(),
+                                "User " + loan.getBorrowerId(),
+                                loan.getStatus()
+                        );
+                    }
+                })
                 .collect(Collectors.toList());
     }
 
@@ -169,7 +157,7 @@ public class LoanService {
     // Applies same role-based visibility rules as getLoansByRole.
     // Returns null if loan not found or user is not authorized to view it.
     public LoanDetailDTO getLoanDetailById(Long loanId, Long userId, String userRole) {
-        LoanApplication loan = loanApplicationRepository.findByIdWithBorrower(loanId).orElse(null);
+        LoanApplication loan = loanApplicationRepository.findById(loanId).orElse(null);
         if (loan == null) {
             return null;
         }
@@ -193,14 +181,17 @@ public class LoanService {
         detail.setStatus(loan.getStatus());
         detail.setCreatedAt(loan.getCreatedAt());
 
-        // Borrower info.
-        Borrower borrower = loan.getBorrower();
-        detail.setBorrowerFirstName(borrower.getFirstName());
-        detail.setBorrowerLastName(borrower.getLastName());
-        detail.setBorrowerEmail(borrower.getEmail());
-        detail.setBorrowerPhone(borrower.getPhone());
-        detail.setBorrowerCreditScore(borrower.getCreditScore());
-        detail.setBorrowerAnnualIncome(borrower.getAnnualIncome());
+        // Borrower info — fetch from auth-service.
+        try {
+            UserDto borrowerDto = userClient.getUserById(loan.getBorrowerId());
+            detail.setBorrowerFirstName(borrowerDto.getFirstName());
+            detail.setBorrowerLastName(borrowerDto.getLastName());
+            detail.setBorrowerEmail(borrowerDto.getEmail());
+            // Note: UserDto doesn't include phone, credit score, annual income — those are borrower-specific.
+            // We could add a BorrowerDto that includes these, or just leave them as null/default.
+        } catch (Exception e) {
+            // If borrower not found in auth-service, still return loan but without borrower details.
+        }
 
         // Assessment (if exists).
         if (assessment != null) {
@@ -520,7 +511,7 @@ public class LoanService {
     private boolean isAuthorizedToViewLoan(Long userId, String userRole, LoanApplication loan) {
         switch (userRole) {
             case "BORROWER":
-                return loan.getBorrower().getUserId().equals(userId);
+                return loan.getBorrowerId().equals(userId);
             case "CREDIT_OFFICER":
                 return loan.getStatus() == LoanStatus.APPLIED;
             case "APPRAISER":
