@@ -1,0 +1,19 @@
+Terminal 1: Start infrastructure (PostgreSQL + Kafka)
+
+Terminal 2: Start auth-service (port 8083)
+
+cd /Users/shilpa/loan_origination
+mvn -pl auth-service spring-boot:run
+Terminal 3: Start loan-service (port 8081)
+
+cd /Users/shilpa/loan_origination
+mvn -pl loan-service spring-boot:run
+Terminal 4: Start notification-service (port 8082)
+
+cd /Users/shilpa/loan_origination
+mvn -pl notification-service spring-boot:run
+Terminal 5: Start api-gateway-service (port 8080)
+
+cd /Users/shilpa/loan_origination
+mvn -pl api-gateway-service spring-boot:run
+Once all 5 are running, try the Postman collection!
