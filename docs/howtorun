@@ -1,19 +1,79 @@
-Terminal 1: Start infrastructure (PostgreSQL + Kafka)
+# Local Run Guide
+
+## Option A: Start everything with one script (recommended)
+
+```bash
+cd /Users/shilpa/Documents/Projects/loan_origination
+./start-all.sh
+```
+
+This starts:
+- Infrastructure (PostgreSQL + Kafka + Zookeeper)
+- `auth-service` (8083)
+- `loan-service` (8081)
+- `notification-service` (8082)
+- `api-gateway-service` (8080)
+- `test-client` (8084)
+
+Stop everything:
+
+```bash
+cd /Users/shilpa/Documents/Projects/loan_origination
+./stop-all.sh
+```
+
+## Option B: Start services individually
+
+Terminal 1: Start infrastructure (PostgreSQL + Kafka + Zookeeper)
+
+```
+cd /Users/shilpa/Documents/Projects/loan_origination
+docker compose up
+```
 
 Terminal 2: Start auth-service (port 8083)
 
-cd /Users/shilpa/loan_origination
+```
+cd /Users/shilpa/Documents/Projects/loan_origination
 mvn -pl auth-service spring-boot:run
+```
+
 Terminal 3: Start loan-service (port 8081)
 
-cd /Users/shilpa/loan_origination
+```
+cd /Users/shilpa/Documents/Projects/loan_origination
 mvn -pl loan-service spring-boot:run
+```
+
 Terminal 4: Start notification-service (port 8082)
 
-cd /Users/shilpa/loan_origination
+```
+cd /Users/shilpa/Documents/Projects/loan_origination
 mvn -pl notification-service spring-boot:run
+```
+
 Terminal 5: Start api-gateway-service (port 8080)
 
-cd /Users/shilpa/loan_origination
+```
+cd /Users/shilpa/Documents/Projects/loan_origination
 mvn -pl api-gateway-service spring-boot:run
-Once all 5 are running, try the Postman collection!
+```
+
+Terminal 6 (optional): Start test-client (port 8084)
+
+```bash
+cd /Users/shilpa/Documents/Projects/loan_origination
+mvn -pl test-client spring-boot:run
+```
+
+Once running, test-client health endpoint:
+
+```bash
+curl http://localhost:8084/test/health
+```
+
+Then run smoke tests through:
+- Gateway directly (`http://localhost:8080`)
+- or test-client proxy endpoints (`http://localhost:8084/test/...`)
+
+Postman collection: `docs/EP7-Gateway-Smoke-Test.postman_collection.json`.
