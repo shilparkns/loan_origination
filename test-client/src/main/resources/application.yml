@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: test-client
+
+server:
+  port: 8084
+
+gateway:
+  base-url: http://localhost:8080

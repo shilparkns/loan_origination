@@ -21,6 +21,7 @@
         <module>auth-service</module>
         <module>notification-service</module>
         <module>api-gateway-service</module>
+        <module>test-client</module>
     </modules>
 
     <properties>
