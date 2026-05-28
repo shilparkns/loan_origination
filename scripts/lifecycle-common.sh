@@ -27,22 +27,29 @@ lifecycle_register_login() {
     --arg role "$role" \
     '{firstName: $fn, lastName: $ln, email: $em, password: $pw, role: $role}')
 
-  local resp token
-  resp=$(curl -s -X POST "${LIFECYCLE_BASE_URL}${LIFECYCLE_AUTH_PATH}/register" \
+  local resp token http_code
+  resp=$(curl -sS --max-time 30 -X POST "${LIFECYCLE_BASE_URL}${LIFECYCLE_AUTH_PATH}/register" \
     -H "Content-Type: application/json" \
-    -d "$body")
-  token=$(echo "$resp" | jq -r '.token // empty')
+    -d "$body" \
+    -w "\n__HTTP_CODE__:%{http_code}")
+  http_code="${resp##*__HTTP_CODE__:}"
+  resp="${resp%__HTTP_CODE__:*}"
+
+  token=$(echo "$resp" | jq -r '.token // empty' 2>/dev/null || true)
 
   if [[ -z "$token" ]]; then
-    resp=$(curl -s -X POST "${LIFECYCLE_BASE_URL}${LIFECYCLE_AUTH_PATH}/login" \
+    resp=$(curl -sS --max-time 30 -X POST "${LIFECYCLE_BASE_URL}${LIFECYCLE_AUTH_PATH}/login" \
       -H "Content-Type: application/json" \
-      -d "$(jq -n --arg em "$email" --arg pw "pass123" '{email: $em, password: $pw}')")
-    token=$(echo "$resp" | jq -r '.token // empty')
+      -d "$(jq -n --arg em "$email" --arg pw "pass123" '{email: $em, password: $pw}')" \
+      -w "\n__HTTP_CODE__:%{http_code}")
+    http_code="${resp##*__HTTP_CODE__:}"
+    resp="${resp%__HTTP_CODE__:*}"
+    token=$(echo "$resp" | jq -r '.token // empty' 2>/dev/null || true)
   fi
 
   if [[ -z "$token" ]]; then
-    echo "Failed to obtain token for role=$role email=$email"
-    echo "$resp" | jq '.' 2>/dev/null || echo "$resp"
+    echo "Failed to obtain token for role=$role email=$email (HTTP $http_code)" >&2
+    echo "$resp" | jq '.' 2>/dev/null >&2 || echo "$resp" >&2
     exit 1
   fi
 
@@ -53,10 +60,10 @@ lifecycle_expect_status_field() {
   local json="$1"
   local expected="$2"
   local actual
-  actual=$(echo "$json" | jq -r '.status // empty')
+  actual=$(echo "$json" | jq -r '.status // empty' 2>/dev/null || true)
   if [[ "$actual" != "$expected" ]]; then
-    echo "Expected status=$expected but got status=$actual"
-    echo "$json" | jq '.'
+    echo "Expected status=$expected but got status=$actual" >&2
+    echo "$json" | jq '.' 2>/dev/null >&2 || echo "$json" >&2
     exit 1
   fi
 }

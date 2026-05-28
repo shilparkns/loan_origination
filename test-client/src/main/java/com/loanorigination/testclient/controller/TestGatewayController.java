@@ -125,15 +125,22 @@ public class TestGatewayController {
                 requestSpec = requestSpec.header(HttpHeaders.AUTHORIZATION, authorization);
             }
 
+            ResponseEntity<String> upstream;
             if (payload != null) {
-                return requestSpec.body(payload)
+                upstream = requestSpec.body(payload)
+                        .retrieve()
+                        .toEntity(String.class);
+            } else {
+                upstream = requestSpec
                         .retrieve()
                         .toEntity(String.class);
             }
 
-            return requestSpec
-                    .retrieve()
-                    .toEntity(String.class);
+            // Do not forward hop-by-hop headers (e.g. Transfer-Encoding: chunked) from gateway;
+            // that breaks curl and scripts when Tomcat re-encodes the body.
+            return ResponseEntity.status(upstream.getStatusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(upstream.getBody());
         } catch (RestClientResponseException ex) {
             return ResponseEntity.status(ex.getStatusCode())
                     .contentType(MediaType.APPLICATION_JSON)
